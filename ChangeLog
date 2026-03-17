@@ -3,6 +3,14 @@ Latest:
  For even more detail, use "git log" or visit https://github.com/LINBIT/drbd/commits/master.
 
 
+9.2.17-flant.2 (api:genl2/proto:86-101,118-124/transport:21)
+--------
+ * Rebase Flant patches onto upstream 9.2.17
+ * Cherry-pick fix for use-after-free in resync discard processing
+ * Shift Flant netlink attribute IDs to avoid upstream collisions
+ * Quorum enhancements: minimum redundancy, dynamic voters, non-voting disk
+ * Fix resync stall due to race in w_resync_timer
+
 9.2.17 (api:genl2/proto:86-101,118-124/transport:21)
 --------
  * Fix a kernel crash triggered by a crafted/invalid netlink message

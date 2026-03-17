@@ -1,3 +1,9 @@
+drbd (9.2.17~flant.2-1) unstable; urgency=medium
+
+  * Rebase Flant patches onto upstream 9.2.17
+
+ -- Flant <sds-team@flant.com>  Mon, 17 Mar 2026 12:00:00 +0300
+
 drbd (9.2.17-1) unstable; urgency=medium
 
   * New upstream release
