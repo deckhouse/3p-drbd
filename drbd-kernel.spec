@@ -1,6 +1,6 @@
 Name: drbd-kernel
 Summary: Kernel driver for DRBD
-Version: 9.2.17
+Version: 9.2.17~flant.1
 Release: 1
 
 # always require a suitable userland
@@ -232,6 +232,9 @@ dkms remove -m $DKMS_NAME -v $DKMS_VERSION -q --all --rpm_safe_upgrade || :
 %endif
 
 %changelog
+* Mon Mar 17 2026 Flant <sds@flant.com> - 9.2.17~flant.1
+-  Flant patched release based on 9.2.17.
+
 * Mon Mar 09 2026 Philipp Reisner <phil@linbit.com> - 9.2.17
 -  New upstream release.
 
