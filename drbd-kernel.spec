@@ -1,6 +1,6 @@
 Name: drbd-kernel
 Summary: Kernel driver for DRBD
-Version: 9.2.17~flant.2
+Version: 9.2.17~flant.3
 Release: 1
 
 # always require a suitable userland
@@ -232,6 +232,9 @@ dkms remove -m $DKMS_NAME -v $DKMS_VERSION -q --all --rpm_safe_upgrade || :
 %endif
 
 %changelog
+* Tue Mar 18 2026 Flant <sds-team@flant.com> - 9.2.17~flant.3
+-  Fix dagtag-dependent resync stall after Primary reconnect.
+
 * Mon Mar 17 2026 Flant <sds-team@flant.com> - 9.2.17~flant.2
 -  Flant fork: rebase onto upstream 9.2.17, shifted netlink IDs,
    cherry-picked use-after-free fix, quorum and non-voting patches.
