@@ -1,3 +1,9 @@
+drbd (9.2.17~flant.4-1) unstable; urgency=medium
+
+  * Skip meaningless UUID rotation for diskless at Aborting Connect
+
+ -- Flant <sds-team@flant.com>  Fri, 20 Mar 2026 12:00:00 +0300
+
 drbd (9.2.17~flant.3-1) unstable; urgency=medium
 
   * Fix dagtag-dependent resync stall after Primary reconnect

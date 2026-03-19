@@ -1,6 +1,6 @@
 Name: drbd-kernel
 Summary: Kernel driver for DRBD
-Version: 9.2.17~flant.3
+Version: 9.2.17~flant.4
 Release: 1
 
 # always require a suitable userland
@@ -232,6 +232,10 @@ dkms remove -m $DKMS_NAME -v $DKMS_VERSION -q --all --rpm_safe_upgrade || :
 %endif
 
 %changelog
+* Fri Mar 20 2026 Flant <sds-team@flant.com> - 9.2.17~flant.4
+-  Skip meaningless UUID rotation for diskless at Aborting Connect
+   (fixes deadlocks after stress with rebooted peer).
+
 * Tue Mar 18 2026 Flant <sds-team@flant.com> - 9.2.17~flant.3
 -  Fix dagtag-dependent resync stall after Primary reconnect.
 
