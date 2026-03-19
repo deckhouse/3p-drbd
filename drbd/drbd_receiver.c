@@ -8265,7 +8265,8 @@ static int receive_state(struct drbd_connection *connection, struct packet_info 
 		/* Do not allow RESEND for a rebooted peer. We can only allow this
 		   for temporary network outages! */
 		drbd_err(peer_device, "Aborting Connect, can not thaw IO with an only Consistent peer\n");
-		drbd_uuid_new_current(device, false);
+		if (device->disk_state[NOW] != D_DISKLESS)
+			drbd_uuid_new_current(device, false);
 		begin_state_change(resource, &irq_flags, CS_HARD);
 		__change_cstate(connection, C_PROTOCOL_ERROR);
 		__change_io_susp_user(resource, false);
