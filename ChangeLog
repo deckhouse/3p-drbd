@@ -3,6 +3,10 @@ Latest:
  For even more detail, use "git log" or visit https://github.com/LINBIT/drbd/commits/master.
 
 
+9.2.17-flant.5 (api:genl2/proto:86-101,118-124/transport:21)
+--------
+ * Fix UUID ancestor detection deadlock on diskless Primary
+
 9.2.17-flant.4 (api:genl2/proto:86-101,118-124/transport:21)
 --------
  * Skip meaningless UUID rotation for diskless at Aborting Connect

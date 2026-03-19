@@ -1,6 +1,6 @@
 Name: drbd-kernel
 Summary: Kernel driver for DRBD
-Version: 9.2.17~flant.4
+Version: 9.2.17~flant.5
 Release: 1
 
 # always require a suitable userland
@@ -232,6 +232,9 @@ dkms remove -m $DKMS_NAME -v $DKMS_VERSION -q --all --rpm_safe_upgrade || :
 %endif
 
 %changelog
+* Wed Mar 19 2026 Flant <sds-team@flant.com> - 9.2.17~flant.5
+-  Fix UUID ancestor detection deadlock on diskless Primary.
+
 * Fri Mar 20 2026 Flant <sds-team@flant.com> - 9.2.17~flant.4
 -  Skip meaningless UUID rotation for diskless at Aborting Connect
    (fixes deadlocks after stress with rebooted peer).
