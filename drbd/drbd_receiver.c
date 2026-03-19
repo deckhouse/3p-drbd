@@ -7966,8 +7966,21 @@ static void diskless_with_peers_different_current_uuids(struct drbd_peer_device 
 			*peer_disk_state = D_OUTDATED;
 			/* See "Do not trust this guy!" in sanitize_state() */
 	} else {
-		drbd_warn(peer_device, "Current UUID of peer does not match my exposed UUID.");
-		set_bit(CONN_HANDSHAKE_DISCONNECT, &connection->flags);
+		u64 prev = device->previous_exposed_data_uuid & ~UUID_PRIMARY;
+		u64 pcur = peer_device->current_uuid & ~UUID_PRIMARY;
+
+		if (prev != 0 && prev == pcur) {
+			drbd_warn(peer_device,
+				  "Peer UUID matches previous exposed UUID, "
+				  "treating as data ancestor\n");
+			if (*peer_disk_state > D_OUTDATED)
+				*peer_disk_state = D_OUTDATED;
+		} else {
+			drbd_warn(peer_device,
+				  "Current UUID of peer does not match "
+				  "my exposed UUID.");
+			set_bit(CONN_HANDSHAKE_DISCONNECT, &connection->flags);
+		}
 	}
 }
 

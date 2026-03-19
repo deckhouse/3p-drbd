@@ -1596,6 +1596,7 @@ struct drbd_device {
 	wait_queue_head_t seq_wait;
 	u64 exposed_data_uuid; /* UUID of the exposed data */
 	u64 next_exposed_data_uuid;
+	u64 previous_exposed_data_uuid; /* RAM-only: previous exposed UUID for diskless ancestor detection */
 	struct rw_semaphore uuid_sem;
 	atomic_t rs_sect_ev; /* for submitted resync data rate, both */
 	struct pending_bitmap_work_s {
