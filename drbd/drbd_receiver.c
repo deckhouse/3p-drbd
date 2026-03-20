@@ -5213,7 +5213,9 @@ static enum sync_strategy drbd_sync_handshake(struct drbd_peer_device *peer_devi
 	 */
 	need_full_sync_after_split_brain = (strategy == SPLIT_BRAIN_DISCONNECT);
 
-	if (strategy == SPLIT_BRAIN_AUTO_RECOVER || (strategy == SPLIT_BRAIN_DISCONNECT && always_asbp)) {
+	if (strategy == SPLIT_BRAIN_AUTO_RECOVER ||
+	    (strategy == SPLIT_BRAIN_DISCONNECT &&
+	     (always_asbp || device->resource->res_opts.quorum != QOU_OFF))) {
 		int pcount = (device->resource->role[NOW] == R_PRIMARY)
 			   + (peer_role == R_PRIMARY);
 
@@ -5236,6 +5238,21 @@ static enum sync_strategy drbd_sync_handshake(struct drbd_peer_device *peer_devi
 				strategy = drbd_asb_recover_2p(peer_device);
 				break;
 			}
+		}
+		/* With quorum enabled: two UpToDate secondaries cannot have
+		 * genuinely conflicting data (all writes require majority ack
+		 * from a single Primary). Resolve via tiebreaker. */
+		if (strategy_descriptor(strategy).is_split_brain &&
+		    pcount == 0 &&
+		    device->resource->res_opts.quorum != QOU_OFF) {
+			drbd_warn(peer_device,
+				  "Split-Brain between two secondaries with "
+				  "quorum enabled, resolving via tiebreaker\n");
+			strategy = test_bit(RESOLVE_CONFLICTS,
+					    &connection->transport.flags)
+				? SYNC_SOURCE_SET_BITMAP
+				: SYNC_TARGET_SET_BITMAP;
+			need_full_sync_after_split_brain = false;
 		}
 		if (!strategy_descriptor(strategy).is_split_brain) {
 			drbd_warn(peer_device, "Split-Brain detected, %d primaries, "
@@ -7966,10 +7983,19 @@ static void diskless_with_peers_different_current_uuids(struct drbd_peer_device 
 			*peer_disk_state = D_OUTDATED;
 			/* See "Do not trust this guy!" in sanitize_state() */
 	} else {
-		u64 prev = device->previous_exposed_data_uuid & ~UUID_PRIMARY;
 		u64 pcur = peer_device->current_uuid & ~UUID_PRIMARY;
+		bool found = false;
+		int i;
 
-		if (prev != 0 && prev == pcur) {
+		for (i = 0; i < ARRAY_SIZE(device->prev_exposed_uuids); i++) {
+			u64 prev = device->prev_exposed_uuids[i] & ~UUID_PRIMARY;
+			if (prev != 0 && prev == pcur) {
+				found = true;
+				break;
+			}
+		}
+
+		if (found) {
 			drbd_warn(peer_device,
 				  "Peer UUID matches previous exposed UUID, "
 				  "treating as data ancestor\n");
@@ -8875,11 +8901,22 @@ static int receive_peer_dagtag(struct drbd_connection *connection, struct packet
 			if (strategy != NO_SYNC &&
 			    strategy != SYNC_SOURCE_USE_BITMAP &&
 			    strategy != SYNC_TARGET_USE_BITMAP) {
-				drbd_info(peer_device,
-					  "receive_peer_dagatg(): %s by rule=%s\n",
-					  strategy_descriptor(strategy).name,
-					  drbd_sync_rule_str(rule));
-				goto out;
+				if (strategy_descriptor(strategy).is_split_brain &&
+				    resource->res_opts.quorum != QOU_OFF &&
+				    peer_device->device->disk_state[NOW] == D_UP_TO_DATE) {
+					drbd_info(peer_device,
+						  "receive_peer_dagatg(): resolving %s "
+						  "(rule=%s) via dagtag, quorum enabled\n",
+						  strategy_descriptor(strategy).name,
+						  drbd_sync_rule_str(rule));
+					strategy = NO_SYNC;
+				} else {
+					drbd_info(peer_device,
+						  "receive_peer_dagatg(): %s by rule=%s\n",
+						  strategy_descriptor(strategy).name,
+						  drbd_sync_rule_str(rule));
+					goto out;
+				}
 			}
 		} else if (ps != strategy) {
 			drbd_err(peer_device,

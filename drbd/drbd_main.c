@@ -5339,8 +5339,11 @@ bool drbd_uuid_set_exposed(struct drbd_device *device, u64 val, bool log)
 	else
 		val &= ~UUID_PRIMARY;
 
-	if (device->disk_state[NOW] == D_DISKLESS)
-		device->previous_exposed_data_uuid = device->exposed_data_uuid;
+	if (device->disk_state[NOW] == D_DISKLESS) {
+		int idx = device->prev_exposed_uuid_idx;
+		device->prev_exposed_uuids[idx] = device->exposed_data_uuid;
+		device->prev_exposed_uuid_idx = (idx + 1) % ARRAY_SIZE(device->prev_exposed_uuids);
+	}
 
 	device->exposed_data_uuid = val;
 
