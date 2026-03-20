@@ -1,6 +1,6 @@
 Name: drbd-kernel
 Summary: Kernel driver for DRBD
-Version: 9.2.17~flant.6
+Version: 9.2.17~flant.7
 Release: 1
 
 # always require a suitable userland
@@ -232,6 +232,9 @@ dkms remove -m $DKMS_NAME -v $DKMS_VERSION -q --all --rpm_safe_upgrade || :
 %endif
 
 %changelog
+* Thu Mar 20 2026 Flant <sds-team@flant.com> - 9.2.17~flant.7
+-  Fix reconciliation resync WFBitMapT/Established deadlock.
+
 * Thu Mar 20 2026 Flant <sds-team@flant.com> - 9.2.17~flant.6
 -  Fix false split-brain deadlock from diskless Primary UUID churn.
 

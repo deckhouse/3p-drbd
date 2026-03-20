@@ -1,3 +1,9 @@
+drbd (9.2.17~flant.7-1) unstable; urgency=medium
+
+  * Fix reconciliation resync WFBitMapT/Established deadlock
+
+ -- Flant <sds-team@flant.com>  Thu, 20 Mar 2026 18:00:00 +0300
+
 drbd (9.2.17~flant.6-1) unstable; urgency=medium
 
   * Fix false split-brain deadlock from diskless Primary UUID churn
