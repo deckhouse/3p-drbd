@@ -725,6 +725,73 @@ static void arm_connect_timer(struct drbd_connection *connection, unsigned long 
 	}
 }
 
+static int reconciliation_timeout_work(struct drbd_work *w, int cancel)
+{
+	struct drbd_connection *connection =
+		container_of(w, struct drbd_connection, reconciliation_timer_work);
+	struct drbd_peer_device *peer_device;
+	enum drbd_repl_state stuck_repl = L_OFF;
+	int vnr;
+
+	if (cancel)
+		goto out;
+
+	rcu_read_lock();
+	idr_for_each_entry(&connection->peer_devices, peer_device, vnr) {
+		enum drbd_repl_state rs = peer_device->repl_state[NOW];
+		if ((rs == L_WF_BITMAP_T || rs == L_WF_BITMAP_S) &&
+		    test_bit(RECONCILIATION_RESYNC, &peer_device->flags)) {
+			stuck_repl = rs;
+			break;
+		}
+	}
+	rcu_read_unlock();
+
+	if (stuck_repl != L_OFF) {
+		drbd_warn(connection,
+			  "Reconciliation resync stuck in %s, forcing reconnect\n",
+			  drbd_repl_str(stuck_repl));
+		change_cstate_tag(connection, C_TIMEOUT, CS_HARD,
+				  "reconciliation-timeout", NULL);
+	}
+
+out:
+	kref_debug_put(&connection->kref_debug, 17);
+	kref_put(&connection->kref, drbd_destroy_connection);
+	return 0;
+}
+
+void reconciliation_timer_fn(struct timer_list *t)
+{
+	struct drbd_connection *connection =
+		timer_container_of(connection, t, reconciliation_timer);
+
+	connection->reconciliation_timer_work.cb = reconciliation_timeout_work;
+	drbd_queue_work(&connection->sender_work,
+			&connection->reconciliation_timer_work);
+}
+
+static void arm_reconciliation_timer(struct drbd_connection *connection)
+{
+	struct net_conf *nc;
+	long timeout;
+	bool was_pending;
+
+	rcu_read_lock();
+	nc = rcu_dereference(connection->transport.net_conf);
+	timeout = nc ? nc->timeout * HZ / 10 : 10 * HZ;
+	rcu_read_unlock();
+
+	kref_get(&connection->kref);
+	kref_debug_get(&connection->kref_debug, 17);
+	was_pending = mod_timer(&connection->reconciliation_timer,
+				jiffies + timeout);
+	if (was_pending) {
+		kref_debug_put(&connection->kref_debug, 17);
+		kref_put(&connection->kref, drbd_destroy_connection);
+	}
+}
+
 static bool retry_by_rr_conflict(struct drbd_connection *connection)
 {
 	enum drbd_after_sb_p rr_conflict;
@@ -8963,10 +9030,11 @@ static int receive_peer_dagtag(struct drbd_connection *connection, struct packet
 			set_bit(RECONCILIATION_RESYNC, &peer_device->flags);
 		}
 		rv = end_state_change(resource, &irq_flags, "receive-peer-dagtag");
-		if (rv == SS_SUCCESS)
+		if (rv == SS_SUCCESS) {
 			drbd_info(connection, "Reconciliation resync because \'%s\' disappeared. (o=%d)\n",
 				  lost_peer->transport.net_conf->name, (int)dagtag_offset);
-		else if (rv == SS_NOTHING_TO_DO)
+			arm_reconciliation_timer(connection);
+		} else if (rv == SS_NOTHING_TO_DO)
 			drbd_info(connection, "\'%s\' disappeared (o=%d), no reconciliation since one diskless\n",
 				  lost_peer->transport.net_conf->name, (int)dagtag_offset);
 			/* sanitize_state() silently removes the resync and the RECONCILIATION_RESYNC bit */
@@ -9873,6 +9941,7 @@ static void conn_disconnect(struct drbd_connection *connection)
 	change_cstate_tag(connection, C_NETWORK_FAILURE, CS_HARD, "disconnected", NULL);
 
 	del_connect_timer(connection);
+	del_reconciliation_timer(connection);
 
 	/* ack_receiver does not clean up anything. it must not interfere, either */
 	if (connection->ack_sender) {

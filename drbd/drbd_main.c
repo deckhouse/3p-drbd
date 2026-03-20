@@ -3851,6 +3851,9 @@ struct drbd_connection *drbd_create_connection(struct drbd_resource *resource,
 	INIT_LIST_HEAD(&connection->connect_timer_work.list);
 	timer_setup(&connection->connect_timer, connect_timer_fn, 0);
 
+	INIT_LIST_HEAD(&connection->reconciliation_timer_work.list);
+	timer_setup(&connection->reconciliation_timer, reconciliation_timer_fn, 0);
+
 	drbd_thread_init(resource, &connection->receiver, drbd_receiver, "receiver");
 	connection->receiver.connection = connection;
 	drbd_thread_init(resource, &connection->sender, drbd_sender, "sender");
@@ -4379,10 +4382,26 @@ static void shutdown_connect_timer(struct drbd_connection *connection)
 	}
 }
 
+static void shutdown_reconciliation_timer(struct drbd_connection *connection)
+{
+	if (timer_shutdown_sync(&connection->reconciliation_timer)) {
+		kref_debug_put(&connection->kref_debug, 17);
+		kref_put(&connection->kref, drbd_destroy_connection);
+	}
+}
+
 void del_connect_timer(struct drbd_connection *connection)
 {
 	if (timer_delete_sync(&connection->connect_timer)) {
 		kref_debug_put(&connection->kref_debug, 11);
+		kref_put(&connection->kref, drbd_destroy_connection);
+	}
+}
+
+void del_reconciliation_timer(struct drbd_connection *connection)
+{
+	if (timer_delete_sync(&connection->reconciliation_timer)) {
+		kref_debug_put(&connection->kref_debug, 17);
 		kref_put(&connection->kref, drbd_destroy_connection);
 	}
 }
@@ -4414,6 +4433,7 @@ void drbd_unregister_connection(struct drbd_connection *connection)
 	drbd_debugfs_connection_cleanup(connection);
 
 	shutdown_connect_timer(connection);
+	shutdown_reconciliation_timer(connection);
 
 	rr = drbd_free_peer_reqs(connection, &connection->done_ee);
 	if (rr)

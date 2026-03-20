@@ -1116,6 +1116,9 @@ struct drbd_connection {
 	struct drbd_work connect_timer_work;
 	struct timer_list connect_timer;
 
+	struct drbd_work reconciliation_timer_work;
+	struct timer_list reconciliation_timer;
+
 	struct crypto_shash *cram_hmac_tfm;
 	struct crypto_shash *integrity_tfm;  /* checksums we compute, updates protected by connection->mutex[DATA_STREAM] */
 	struct crypto_shash *peer_integrity_tfm;  /* checksums we verify, only accessed from receiver thread  */
@@ -2424,6 +2427,8 @@ void drbd_bump_write_ordering(struct drbd_resource *resource, struct drbd_backin
 
 void twopc_timer_fn(struct timer_list *t);
 void connect_timer_fn(struct timer_list *t);
+void reconciliation_timer_fn(struct timer_list *t);
+void del_reconciliation_timer(struct drbd_connection *connection);
 
 /* drbd_proc.c */
 extern struct proc_dir_entry *drbd_proc;
