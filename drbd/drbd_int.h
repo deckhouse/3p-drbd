@@ -665,6 +665,7 @@ enum peer_device_flag {
 				 * send it our current UUID (the relabel), ordered
 				 * by the sender after the replayed transfer log.
 				 */
+	TRACK_WRITES_IN_BITMAP,
 };
 
 /* We could make these currently hardcoded constants configurable
@@ -1587,6 +1588,8 @@ struct drbd_device {
 
 	struct kref kref;
 	struct kref_debug_info kref_debug;
+
+	unsigned long track_bitmap_slots;
 
 	/* things that are stored as / read from meta data on disk */
 	unsigned long flags;
