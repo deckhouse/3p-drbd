@@ -5753,6 +5753,99 @@ static int drbd_adm_resume_sync(struct sk_buff *skb, struct genl_info *info)
 	return 0;
 }
 
+static int drbd_adm_track_bitmap(struct sk_buff *skb, struct genl_info *info)
+{
+	struct drbd_config_context adm_ctx;
+	struct drbd_peer_device *peer_device;
+	struct drbd_device *device;
+	enum drbd_ret_code retcode;
+	struct track_bitmap_parms parms = {};
+	int err;
+
+	retcode = drbd_adm_prepare(&adm_ctx, skb, info, DRBD_ADM_NEED_PEER_DEVICE);
+	if (!adm_ctx.reply_skb)
+		return retcode;
+
+	peer_device = adm_ctx.peer_device;
+	device = peer_device->device;
+
+	if (mutex_lock_interruptible(&adm_ctx.resource->adm_mutex)) {
+		retcode = ERR_INTR;
+		goto out;
+	}
+
+	if (info->attrs[DRBD_NLA_TRACK_BITMAP_PARMS]) {
+		err = track_bitmap_parms_from_attrs(&parms, info);
+		if (err) {
+			retcode = ERR_MANDATORY_TAG;
+			drbd_msg_put_info(adm_ctx.reply_skb, from_attrs_err_to_txt(err));
+			mutex_unlock(&adm_ctx.resource->adm_mutex);
+			goto out;
+		}
+	}
+
+	if (peer_device->bitmap_index == -1) {
+		retcode = ERR_NO_DISK;
+		mutex_unlock(&adm_ctx.resource->adm_mutex);
+		goto out;
+	}
+
+	if (parms.start) {
+		set_bit(TRACK_WRITES_IN_BITMAP, &peer_device->flags);
+		set_bit(peer_device->bitmap_index, &device->track_bitmap_slots);
+		drbd_info(peer_device, "bitmap tracking started\n");
+	} else {
+		clear_bit(TRACK_WRITES_IN_BITMAP, &peer_device->flags);
+		clear_bit(peer_device->bitmap_index, &device->track_bitmap_slots);
+		if (get_ldev(device)) {
+			drbd_bitmap_io(device, &drbd_bmio_clear_one_peer,
+				       "clear tracked bitmap",
+				       BM_LOCK_BULK | BM_LOCK_SINGLE_SLOT,
+				       peer_device);
+			put_ldev(device);
+		}
+		drbd_info(peer_device, "bitmap tracking stopped, bitmap cleared\n");
+	}
+
+	mutex_unlock(&adm_ctx.resource->adm_mutex);
+out:
+	drbd_adm_finish(&adm_ctx, info, retcode);
+	return 0;
+}
+
+static int drbd_adm_flush_bitmap(struct sk_buff *skb, struct genl_info *info)
+{
+	struct drbd_config_context adm_ctx;
+	struct drbd_device *device;
+	enum drbd_ret_code retcode;
+
+	retcode = drbd_adm_prepare(&adm_ctx, skb, info, DRBD_ADM_NEED_MINOR);
+	if (!adm_ctx.reply_skb)
+		return retcode;
+
+	device = adm_ctx.device;
+
+	if (mutex_lock_interruptible(&adm_ctx.resource->adm_mutex)) {
+		retcode = ERR_INTR;
+		goto out;
+	}
+
+	if (!get_ldev(device)) {
+		retcode = ERR_NO_DISK;
+		mutex_unlock(&adm_ctx.resource->adm_mutex);
+		goto out;
+	}
+
+	drbd_bitmap_io(device, &drbd_bm_write, "flush-bitmap",
+		       BM_LOCK_BULK, NULL);
+	put_ldev(device);
+
+	mutex_unlock(&adm_ctx.resource->adm_mutex);
+out:
+	drbd_adm_finish(&adm_ctx, info, retcode);
+	return 0;
+}
+
 static bool io_drained(struct drbd_device *device)
 {
 	struct drbd_peer_device *peer_device;
