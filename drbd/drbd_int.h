@@ -626,6 +626,7 @@ enum peer_device_flag {
 	UUIDS_RECEIVED,		/* Have recent UUIDs from the peer */
 	CURRENT_UUID_RECEIVED,	/* Got a p_current_uuid packet */
 	PEER_QUORATE,		/* Peer has quorum */
+	TRACK_WRITES_IN_BITMAP,
 };
 
 /* We could make these currently hardcoded constants configurable
@@ -1535,6 +1536,8 @@ struct drbd_device {
 
 	struct kref kref;
 	struct kref_debug_info kref_debug;
+
+	unsigned long track_bitmap_slots;
 
 	/* things that are stored as / read from meta data on disk */
 	unsigned long flags;
