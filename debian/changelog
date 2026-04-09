@@ -1,4 +1,4 @@
-drbd (9.2.16~flant.3-1) unstable; urgency=medium
+drbd (9.2.16~flant.5-1) unstable; urgency=medium
 
   * Fix drbdsetup down/del-peer/del-connection hang scenarios
   * Fix receiver thread restart race and connect loop exit

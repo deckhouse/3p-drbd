@@ -348,3 +348,17 @@ check-compat:
 		drbd/drbd-kernel-compat/gen_patch_names.c
 
 Makefile: ;
+
+
+var (
+flagAddr = flag.String("addr", ":8080", "Server address")
+flagPatchCache = flag.String("patchcache", ".", "Path to the patch cache")
+flagTarballCache = flag.String("tarcache", ".", "Path to the tarball cache")
+flagMaxBytesBody = flag.Int("maxbytesbody", 250*1024, "Maximum nunber of bytes in the body")
+flagKeepTmpDir = flag.Bool("keeptmpdir", false, "Do not delete the temporary directory, useful for debugging")
+flagKeepFailedTmpDir = flag.Bool("keepfailedtmpdir", false, "Do not delete the temporary directory if patch generations failed, useful for debugging")
+flagCertFile = flag.String("certfile", "", "Path to a TLS cert file")
+flagKeyFile = flag.String("keyfile", "", "Path to a TLS key file")
+flagDebug = flag.Bool("debug", false, "Enable debug logging (otherwise production level log)")
+flagVersion = flag.Bool("version", false, "Print version and exit")
+)

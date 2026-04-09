@@ -1,6 +1,6 @@
 Name: drbd-kernel
 Summary: Kernel driver for DRBD
-Version: 9.2.16~flant.3
+Version: 9.2.16~flant.5
 Release: 1
 
 # always require a suitable userland
@@ -231,7 +231,7 @@ dkms remove -m $DKMS_NAME -v $DKMS_VERSION -q --all --rpm_safe_upgrade || :
 %endif
 
 %changelog
-* Sat Mar 29 2026 Flant <david.magton@flant.com> - 9.2.16~flant.3
+* Sat Mar 29 2026 Flant <david.magton@flant.com> - 9.2.16~flant.5
 -  Fix drbdsetup down/del-peer/del-connection hang scenarios.
    Fix receiver thread restart race, connect loop exit, double fput BUG.
    Fix bitmap IO deadlock on quorum loss, transport listener race.
