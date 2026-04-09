@@ -3,4 +3,4 @@
 	url = https://github.com/MrTomSawyer/3p-drbd-headers.git
 	update = rebase
 	fetchRecurseSubmodules = true
-	branch = vvoyt-bitmap-track-flush
+	branch = drbd-vvoytbitmap
