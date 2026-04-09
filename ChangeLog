@@ -2,7 +2,7 @@ Latest:
 ------
  For even more detail, use "git log" or visit https://github.com/LINBIT/drbd/commits/master.
 
-9.2.16-flant.3 (api:genl2/proto:86-101,118-123/transport:19)
+9.2.16-flant.5 (api:genl2/proto:86-101,118-123/transport:19)
 --------
  * Fix drbdsetup down hang when receiver thread is in connect loop
  * Fix del_connection hang caused by receiver thread restart race

@@ -298,6 +298,9 @@ void drbd_req_destroy(struct kref *kref)
 					if (bitmap_index == -1)
 						continue;
 
+					if (test_bit(bitmap_index, &device->track_bitmap_slots))
+						continue;
+
 					if (net_rq_state & RQ_NET_SIS)
 						clear_bit(bitmap_index, &bits);
 					else
