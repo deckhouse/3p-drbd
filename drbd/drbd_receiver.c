@@ -690,6 +690,14 @@ void conn_connect2(struct drbd_connection *connection)
 		}
 	}
 
+	/* Exchange admin_lock state with the peer once per connection, before
+	 * we start per-peer_device handshakes. The merge happens on receive
+	 * via drbd_admin_lock_apply_peer_view; we just push our local view
+	 * here and trust the peer to do the same. Only meaningful when both
+	 * sides advertise DRBD_FF_ADMIN_LOCK. */
+	if (connection->agreed_features & DRBD_FF_ADMIN_LOCK)
+		drbd_send_admin_lock_state(connection);
+
 	rcu_read_lock();
 	idr_for_each_entry(&connection->peer_devices, peer_device, vnr) {
 		struct drbd_device *device = peer_device->device;
@@ -7642,7 +7650,23 @@ static void nested_twopc_abort(struct drbd_resource *resource, struct twopc_requ
 
 static bool is_prepare(enum drbd_packet cmd)
 {
-	return cmd == P_TWOPC_PREP_RSZ || cmd == P_TWOPC_PREPARE;
+	return cmd == P_TWOPC_PREP_RSZ || cmd == P_TWOPC_PREPARE ||
+	       cmd == P_TWOPC_PREP_LOCK;
+}
+
+/* Map a P_TWOPC_PREP_* command to the corresponding twopc_type. */
+static enum twopc_type twopc_type_for_prepare_cmd(enum drbd_packet cmd)
+{
+	switch (cmd) {
+	case P_TWOPC_PREPARE:
+		return TWOPC_STATE_CHANGE;
+	case P_TWOPC_PREP_RSZ:
+		return TWOPC_RESIZE;
+	case P_TWOPC_PREP_LOCK:
+		return TWOPC_ADMIN_LOCK;
+	default:
+		BUG();
+	}
 }
 
 
@@ -7836,8 +7860,7 @@ retry:
 			return;
 		}
 		resource->remote_state_change = true;
-		resource->twopc.type =
-			pi->cmd == P_TWOPC_PREPARE ? TWOPC_STATE_CHANGE : TWOPC_RESIZE;
+		resource->twopc.type = twopc_type_for_prepare_cmd(pi->cmd);
 		resource->twopc_prepare_reply_cmd = 0;
 		resource->twopc_parent_nodes = NODE_MASK(connection->peer_node_id);
 		clear_bit(TWOPC_EXECUTED, &resource->flags);
@@ -7879,8 +7902,7 @@ retry:
 			return;
 		}
 		resource->remote_state_change = true;
-		resource->twopc.type =
-			pi->cmd == P_TWOPC_PREPARE ? TWOPC_STATE_CHANGE : TWOPC_RESIZE;
+		resource->twopc.type = twopc_type_for_prepare_cmd(pi->cmd);
 		resource->twopc_parent_nodes = NODE_MASK(connection->peer_node_id);
 		resource->twopc_prepare_reply_cmd = 0;
 		clear_bit(TWOPC_EXECUTED, &resource->flags);
@@ -7987,6 +8009,21 @@ retry:
 				be64_to_cpu(p->diskful_primary_nodes);
 			resource->twopc.resize.new_size = be64_to_cpu(p->exposed_size);
 		}
+		break;
+	case TWOPC_ADMIN_LOCK:
+		/* No type-specific payload on the wire: tid is the new
+		 * generation, initiator_node_id is the holder, and the
+		 * lock vs unlock op is encoded in request.flags. The
+		 * reply (YES/NO) is computed below in the per-type
+		 * prepare-validation switch. */
+		if (request.cmd == P_TWOPC_PREP_LOCK) {
+			resource->twopc.admin_lock.is_lock =
+				request.flags & TWOPC_ADMIN_LOCK_OP_LOCK;
+			resource->twopc.admin_lock.holder_node_id =
+				reply->initiator_node_id;
+			resource->twopc.admin_lock.generation_tid = reply->tid;
+		}
+		break;
 	}
 
 	if (affected_connection && affected_connection->cstate[NOW] < C_CONNECTED &&
@@ -8067,6 +8104,12 @@ retry:
 			  reply->tid, (unsigned long long)reply->max_possible_size >> 1);
 		flags |= CS_PREPARE;
 		break;
+	case P_TWOPC_PREP_LOCK:
+		drbd_info(connection, "Preparing remote admin %s %u (holder=%d)\n",
+			  resource->twopc.admin_lock.is_lock ? "lock" : "unlock",
+			  reply->tid, reply->initiator_node_id);
+		flags |= CS_PREPARE;
+		break;
 	case P_TWOPC_ABORT:
 		drbd_info(connection, "Aborting remote state change %u\n",
 			  reply->tid);
@@ -8115,6 +8158,17 @@ retry:
 		if (flags & CS_PREPARE)
 			rv = drbd_support_2pc_resize(resource);
 		break;
+	case TWOPC_ADMIN_LOCK:
+		/* Prepare-phase peer validation. We do NOT wait for any
+		 * background resync to finish here: the coordinator is
+		 * responsible for waiting under its own adm_mutex (so that
+		 * an admin_lock prepare arrives after coordinator-local
+		 * stability). If our local view is "not stable" we reply
+		 * NO immediately and let the coordinator retry. */
+		if (flags & CS_PREPARE)
+			rv = drbd_admin_lock_twopc_prepare_peer(resource,
+								&resource->twopc.admin_lock);
+		break;
 	}
 
 	if (flags & CS_PREPARE) {
@@ -8149,6 +8203,13 @@ retry:
 			device = (peer_device ?: conn_peer_device(connection, pi->vnr))->device;
 
 			drbd_commit_size_change(device, NULL, request.nodes_to_reach);
+			rv = SS_SUCCESS;
+		}
+
+		if (resource->twopc.type == TWOPC_ADMIN_LOCK && flags & CS_PREPARED &&
+		    !(flags & CS_ABORT)) {
+			drbd_admin_lock_twopc_commit_peer(resource,
+							  &resource->twopc.admin_lock);
 			rv = SS_SUCCESS;
 		}
 
@@ -9838,6 +9899,29 @@ static int receive_disconnect(struct drbd_connection *connection, struct packet_
 	return 0;
 }
 
+static int receive_admin_lock_state(struct drbd_connection *connection,
+				    struct packet_info *pi)
+{
+	struct drbd_resource *resource = connection->resource;
+	struct p_admin_lock_state *p = pi->data;
+
+	/* Defensive: a peer that doesn't actually have DRBD_FF_ADMIN_LOCK
+	 * has no business sending us this packet. Drop it without merging
+	 * to avoid corrupting our local view. */
+	if (!(connection->agreed_features & DRBD_FF_ADMIN_LOCK)) {
+		drbd_warn(connection,
+			  "Received P_ADMIN_LOCK_STATE from peer without DRBD_FF_ADMIN_LOCK; ignoring\n");
+		return 0;
+	}
+
+	drbd_admin_lock_apply_peer_view(resource,
+					p->held != 0,
+					p->holder_node_id,
+					be32_to_cpu(p->generation_tid),
+					be64_to_cpu(p->seq));
+	return 0;
+}
+
 struct data_cmd {
 	int expect_payload;
 	unsigned int pkt_size;
@@ -9872,7 +9956,10 @@ static struct data_cmd drbd_cmd_handler[] = {
 	[P_PROTOCOL_UPDATE] = { 1, sizeof(struct p_protocol), receive_protocol },
 	[P_TWOPC_PREPARE] = { 0, sizeof(struct p_twopc_request), receive_twopc },
 	[P_TWOPC_PREP_RSZ]  = { 0, sizeof(struct p_twopc_request), receive_twopc },
+	[P_TWOPC_PREP_LOCK] = { 0, sizeof(struct p_twopc_request), receive_twopc },
 	[P_TWOPC_ABORT] = { 0, sizeof(struct p_twopc_request), receive_twopc },
+	[P_ADMIN_LOCK_STATE] = { 0, sizeof(struct p_admin_lock_state),
+				 receive_admin_lock_state },
 	[P_DAGTAG]	    = { 0, sizeof(struct p_dagtag), receive_dagtag },
 	[P_UUIDS110]	    = { 1, sizeof(struct p_uuids110), receive_uuids110 },
 	[P_PEER_DAGTAG]     = { 0, sizeof(struct p_peer_dagtag), receive_peer_dagtag },

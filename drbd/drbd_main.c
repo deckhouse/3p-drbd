@@ -3861,6 +3861,11 @@ struct drbd_resource *drbd_create_resource(const char *name,
 	resource->role[NOW] = R_SECONDARY;
 	resource->max_node_id = res_opts->drbd8_compat_mode ? 1 : res_opts->node_id;
 	resource->twopc_reply.initiator_node_id = -1;
+	/* admin_lock starts released. holder_node_id needs an explicit -1
+	 * (kzalloc gives 0, which is a valid node id and would falsely
+	 * advertise node 0 as the holder in res_opts dumps). All other
+	 * fields are correctly zero from kzalloc. */
+	resource->admin_lock.holder_node_id = -1;
 	mutex_init(&resource->conf_update);
 	mutex_init(&resource->adm_mutex);
 	mutex_init(&resource->open_release);
