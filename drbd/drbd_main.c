@@ -3307,6 +3307,10 @@ static void drbd_device_finalize_work_fn(struct work_struct *work)
 	struct drbd_device *device = container_of(work, struct drbd_device, finalize_work);
 	struct drbd_resource *resource = device->resource;
 
+	/* Make sure the deferred del_gendisk() teardown has completed before we
+	 * drop the gendisk reference and free the device. */
+	flush_work(&device->unregister_work);
+
 	drbd_bm_free(device);
 
 	put_disk(device->vdisk);
@@ -4177,6 +4181,7 @@ enum drbd_ret_code drbd_create_device(struct drbd_config_context *adm_ctx, unsig
 	}
 
 	INIT_WORK(&device->ldev_destroy_work, drbd_ldev_destroy);
+	INIT_WORK(&device->unregister_work, drbd_unregister_work_fn);
 
 	device->vdisk = disk;
 	device->rq_queue = disk->queue;
@@ -4333,12 +4338,44 @@ out_no_disk:
 }
 
 /**
+ * drbd_unregister_work_fn()  -  deferred block-device teardown
+ * @ws: the device's unregister_work
+ *
+ * del_gendisk() can block for an unbounded amount of time draining the
+ * device's queue (in-flight bios, lingering openers).  Running it here, from a
+ * workqueue, keeps it off the administrative request path so that del-minor
+ * returns promptly and does not hold resource->adm_mutex while it blocks.
+ *
+ * The block device has already been made "invisible" in
+ * drbd_unregister_device(), so no new IO can be started against it by the time
+ * this runs.  put_disk() / freeing the device happens later in
+ * drbd_device_finalize_work_fn(), which flushes this work first.
+ */
+void drbd_unregister_work_fn(struct work_struct *ws)
+{
+	struct drbd_device *device = container_of(ws, struct drbd_device, unregister_work);
+
+	del_gendisk(device->vdisk);
+
+	destroy_workqueue(device->submit_conflict.wq);
+	device->submit_conflict.wq = NULL;
+	destroy_workqueue(device->submit.wq);
+	device->submit.wq = NULL;
+	timer_shutdown_sync(&device->request_timer);
+}
+
+/**
  * drbd_unregister_device()  -  make a device "invisible"
  * @device: DRBD device to unregister
  *
  * Remove the device from the drbd object model and unregister it in the
  * kernel.  Keep reference counts on device->kref; they are dropped in
  * drbd_reclaim_device().
+ *
+ * The potentially long-blocking block-device teardown (del_gendisk() and the
+ * workqueue/timer shutdown that must follow it) is deferred to
+ * drbd_unregister_work_fn() so that the caller does not stall here while
+ * holding resource->adm_mutex.
  */
 void drbd_unregister_device(struct drbd_device *device)
 {
@@ -4359,13 +4396,10 @@ void drbd_unregister_device(struct drbd_device *device)
 	for_each_peer_device(peer_device, device)
 		drbd_debugfs_peer_device_cleanup(peer_device);
 	drbd_debugfs_device_cleanup(device);
-	del_gendisk(device->vdisk);
 
-	destroy_workqueue(device->submit_conflict.wq);
-	device->submit_conflict.wq = NULL;
-	destroy_workqueue(device->submit.wq);
-	device->submit.wq = NULL;
-	timer_shutdown_sync(&device->request_timer);
+	/* Defer del_gendisk() and the teardown that must follow it; it can
+	 * block for a long time and we must not stall the admin path. */
+	queue_work(system_long_wq, &device->unregister_work);
 }
 
 void drbd_reclaim_device(struct rcu_head *rp)

@@ -1634,6 +1634,9 @@ struct drbd_device {
 
 	struct rcu_head rcu;
 	struct work_struct finalize_work;
+	/* Deferred block-device teardown (del_gendisk et al.), so that
+	 * administrative requests do not block on it while holding adm_mutex. */
+	struct work_struct unregister_work;
 };
 
 struct drbd_bm_aio_ctx {
@@ -2114,6 +2117,7 @@ enum drbd_ret_code drbd_create_device(struct drbd_config_context *adm_ctx,
 				      struct device_conf *device_conf,
 				      struct drbd_device **p_device);
 void drbd_unregister_device(struct drbd_device *device);
+void drbd_unregister_work_fn(struct work_struct *ws);
 void drbd_reclaim_device(struct rcu_head *rp);
 void drbd_unregister_connection(struct drbd_connection *connection);
 void drbd_reclaim_connection(struct rcu_head *rp);
