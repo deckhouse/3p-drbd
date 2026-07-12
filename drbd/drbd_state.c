@@ -862,7 +862,10 @@ static enum drbd_state_rv ___end_state_change(struct drbd_resource *resource, st
 	 * depending on that change happens. */
 	smp_wmb();
 	resource->role[NOW] = resource->role[NEW];
-	resource->susp_user[NOW] = resource->susp_user[NEW];
+	if (resource->susp_user[NOW] != resource->susp_user[NEW]) {
+		resource->susp_user[NOW] = resource->susp_user[NEW];
+		drbd_susp_user_watchdog_update(resource);
+	}
 	resource->susp_nod[NOW] = resource->susp_nod[NEW];
 	resource->susp_quorum[NOW] = resource->susp_quorum[NEW];
 	resource->susp_uuid[NOW] = resource->susp_uuid[NEW];
@@ -5975,6 +5978,102 @@ enum drbd_state_rv change_role(struct drbd_resource *resource,
 	if (got_state_sem)
 		up(&resource->state_sem);
 	return rv;
+}
+
+/*
+ * Auto-resume watchdog for user-suspended IO: safety net against an
+ * orchestrator that suspended IO (drbdsetup suspend-io) and never
+ * resumed it. Disabled by default (res_opts.suspend_io_timeout == 0)
+ * to keep the historical unbounded suspend-io semantics; the snapshot
+ * control plane enables it on resources it manages.
+ */
+static void drbd_susp_user_watchdog_work_fn(struct work_struct *work)
+{
+	struct drbd_resource *resource =
+		container_of(work, struct drbd_resource, susp_user_watchdog.work);
+	u32 timeout;
+	bool expired;
+
+	/* Decide under state_rwlock so the deadline read is paired with the
+	 * writers in ___end_state_change / *_watchdog_update (mirrors the
+	 * admin_lock watchdog). The state change itself cannot run under the
+	 * lock, so we only capture the decision here and act after unlocking;
+	 * a re-suspend racing that window at worst resumes the fresh suspend
+	 * early -- the same failure mode the feature already accepts. */
+	read_lock_irq(&resource->state_rwlock);
+	timeout = resource->res_opts.suspend_io_timeout;
+	expired = resource->susp_user[NOW] && timeout &&
+		  time_after_eq(jiffies, resource->susp_user_watchdog.deadline);
+	read_unlock_irq(&resource->state_rwlock);
+
+	/* Only the user suspend bit is touched: susp_nod/fen/quorum recovery
+	 * and the NEW_CUR_UUID handling stay with the explicit resume-io path
+	 * (drbd_adm_resume_io). Clearing susp_user when it is already clear is
+	 * a no-op. */
+	if (expired) {
+		enum drbd_state_rv rv;
+
+		drbd_warn(resource,
+			"suspend-io timeout (%us) expired: auto-resuming IO; "
+			"investigate the component that suspended it\n",
+			timeout);
+		rv = stable_state_change(resource,
+			change_io_susp_user(resource, false,
+					    CS_VERBOSE | CS_WAIT_COMPLETE | CS_SERIALIZE));
+		if (rv < SS_SUCCESS)
+			drbd_err(resource,
+				"suspend-io watchdog: auto-resume failed (%d)\n", rv);
+	}
+
+	kref_debug_put(&resource->kref_debug, 13);
+	kref_put(&resource->kref, drbd_destroy_resource);
+}
+
+static void drbd_susp_user_watchdog_timer_fn(struct timer_list *t)
+{
+	struct drbd_resource *resource =
+		timer_container_of(resource, t, susp_user_watchdog.timer);
+
+	kref_get(&resource->kref);
+	kref_debug_get(&resource->kref_debug, 13);
+	if (!schedule_work(&resource->susp_user_watchdog.work)) {
+		kref_debug_put(&resource->kref_debug, 13);
+		kref_put(&resource->kref, drbd_destroy_resource);
+	}
+}
+
+/* Arm/refresh (susp_user && timeout != 0) or disarm the auto-resume
+ * watchdog. Called from ___end_state_change with state_rwlock held
+ * for write, right after susp_user[NOW] changed. */
+void drbd_susp_user_watchdog_update(struct drbd_resource *resource)
+{
+	u32 timeout = resource->res_opts.suspend_io_timeout;
+
+	if (resource->susp_user[NOW] && timeout) {
+		resource->susp_user_watchdog.deadline =
+			jiffies + (unsigned long)timeout * HZ;
+		mod_timer(&resource->susp_user_watchdog.timer,
+			  resource->susp_user_watchdog.deadline);
+	} else {
+		timer_delete(&resource->susp_user_watchdog.timer);
+	}
+}
+
+void drbd_susp_user_watchdog_init(struct drbd_resource *resource)
+{
+	timer_setup(&resource->susp_user_watchdog.timer,
+		    drbd_susp_user_watchdog_timer_fn, 0);
+	INIT_WORK(&resource->susp_user_watchdog.work,
+		  drbd_susp_user_watchdog_work_fn);
+}
+
+void drbd_susp_user_watchdog_shutdown(struct drbd_resource *resource)
+{
+	timer_shutdown_sync(&resource->susp_user_watchdog.timer);
+	if (cancel_work_sync(&resource->susp_user_watchdog.work)) {
+		kref_debug_put(&resource->kref_debug, 13);
+		kref_put(&resource->kref, drbd_destroy_resource);
+	}
 }
 
 void __change_io_susp_user(struct drbd_resource *resource, bool value)

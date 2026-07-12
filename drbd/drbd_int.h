@@ -1120,6 +1120,18 @@ struct drbd_resource {
 		struct work_struct work;
 	} admin_lock;
 
+	/* Auto-resume watchdog for user-suspended IO
+	 * (res_opts.suspend_io_timeout, 0 = disabled): armed in
+	 * ___end_state_change when susp_user[NOW] turns true, disarmed
+	 * when it clears. The work re-checks (susp_user && deadline
+	 * passed) before resuming, so a newer suspend that moved the
+	 * deadline forward turns a stale expiry into a no-op. */
+	struct {
+		unsigned long deadline;
+		struct timer_list timer;
+		struct work_struct work;
+	} susp_user_watchdog;
+
 	enum write_ordering_e write_ordering;
 
 	/* Protects the current transfer log (tle) fields. */

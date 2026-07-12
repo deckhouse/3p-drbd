@@ -3876,6 +3876,7 @@ struct drbd_resource *drbd_create_resource(const char *name,
 	 * fields are correctly zero from kzalloc. */
 	resource->admin_lock.holder_node_id = -1;
 	drbd_admin_lock_init(resource);
+	drbd_susp_user_watchdog_init(resource);
 	mutex_init(&resource->conf_update);
 	mutex_init(&resource->adm_mutex);
 	mutex_init(&resource->open_release);

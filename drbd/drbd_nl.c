@@ -7715,6 +7715,7 @@ static int adm_del_resource(struct drbd_resource *resource)
 	timer_shutdown_sync(&resource->twopc_timer);
 	timer_shutdown_sync(&resource->peer_ack_timer);
 	drbd_admin_lock_shutdown(resource);
+	drbd_susp_user_watchdog_shutdown(resource);
 	call_rcu(&resource->rcu, drbd_reclaim_resource);
 
 	mutex_lock(&notification_mutex);

@@ -108,6 +108,13 @@ enum drbd_state_rv change_role(struct drbd_resource *resource,
 void __change_io_susp_user(struct drbd_resource *resource, bool value);
 enum drbd_state_rv change_io_susp_user(struct drbd_resource *resource,
 				       bool value, enum chg_state_flags flags);
+/* Auto-resume watchdog for user-suspended IO
+ * (res_opts.suspend_io_timeout). init/shutdown from resource
+ * create/delete; update is called from ___end_state_change under
+ * state_rwlock write when susp_user[NOW] changes. */
+void drbd_susp_user_watchdog_init(struct drbd_resource *resource);
+void drbd_susp_user_watchdog_shutdown(struct drbd_resource *resource);
+void drbd_susp_user_watchdog_update(struct drbd_resource *resource);
 void __change_io_susp_no_data(struct drbd_resource *resource, bool value);
 void __change_io_susp_fencing(struct drbd_connection *connection, bool value);
 void __change_io_susp_quorum(struct drbd_resource *resource, bool value);
