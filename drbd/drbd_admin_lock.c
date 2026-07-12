@@ -111,6 +111,99 @@ bool drbd_admin_lock_blocks(struct drbd_resource *resource, u8 cmd)
 }
 
 /*
+ * Hold watchdog: safety net against a holder node that died while
+ * holding the lock. Every node arms its own local timer when its
+ * admin_lock.held turns true and disarms it on release; on expiry the
+ * work below force-releases the local view (exactly like force-unlock)
+ * and broadcasts it, so surviving peers converge to "released".
+ *
+ * This is deliberately not a lease: an idempotent re-acquire by the
+ * holder does not renew, because peers would not see the renewal and
+ * their deadlines would stay behind. res_opts.admin_lock_hold_timeout
+ * must exceed the worst-case legitimate hold with margin.
+ */
+static void drbd_admin_lock_watchdog_work_fn(struct work_struct *work)
+{
+	struct drbd_resource *resource =
+		container_of(work, struct drbd_resource, admin_lock.work);
+	bool expired = false;
+	int holder = -1;
+	u32 gen = 0;
+	u64 seq = 0;
+
+	write_lock_irq(&resource->state_rwlock);
+	if (resource->admin_lock.held &&
+	    resource->res_opts.admin_lock_hold_timeout &&
+	    time_after_eq(jiffies, resource->admin_lock.deadline)) {
+		holder = resource->admin_lock.holder_node_id;
+		gen = resource->admin_lock.generation_tid;
+		WRITE_ONCE(resource->admin_lock.held, false);
+		WRITE_ONCE(resource->admin_lock.holder_node_id, -1);
+		WRITE_ONCE(resource->admin_lock.generation_tid, 0);
+		seq = ++resource->admin_lock.seq;
+		timer_delete(&resource->admin_lock.timer);
+		expired = true;
+	}
+	write_unlock_irq(&resource->state_rwlock);
+
+	if (expired) {
+		drbd_warn(resource,
+			"admin_lock hold timeout expired: force-releasing lock "
+			"held by node %d gen %u (seq=%llu); investigate the "
+			"snapshot control plane\n",
+			holder, gen, (unsigned long long)seq);
+		drbd_admin_lock_broadcast_state(resource);
+	}
+
+	kref_debug_put(&resource->kref_debug, 12);
+	kref_put(&resource->kref, drbd_destroy_resource);
+}
+
+static void drbd_admin_lock_watchdog_timer_fn(struct timer_list *t)
+{
+	struct drbd_resource *resource =
+		timer_container_of(resource, t, admin_lock.timer);
+
+	kref_get(&resource->kref);
+	kref_debug_get(&resource->kref_debug, 12);
+	if (!schedule_work(&resource->admin_lock.work)) {
+		kref_debug_put(&resource->kref_debug, 12);
+		kref_put(&resource->kref, drbd_destroy_resource);
+	}
+}
+
+void drbd_admin_lock_update_watchdog(struct drbd_resource *resource)
+{
+	u32 timeout = resource->res_opts.admin_lock_hold_timeout;
+
+	if (READ_ONCE(resource->admin_lock.held) && timeout) {
+		resource->admin_lock.deadline =
+			jiffies + (unsigned long)timeout * HZ;
+		mod_timer(&resource->admin_lock.timer,
+			  resource->admin_lock.deadline);
+	} else {
+		timer_delete(&resource->admin_lock.timer);
+	}
+}
+
+void drbd_admin_lock_init(struct drbd_resource *resource)
+{
+	timer_setup(&resource->admin_lock.timer,
+		    drbd_admin_lock_watchdog_timer_fn, 0);
+	INIT_WORK(&resource->admin_lock.work,
+		  drbd_admin_lock_watchdog_work_fn);
+}
+
+void drbd_admin_lock_shutdown(struct drbd_resource *resource)
+{
+	timer_shutdown_sync(&resource->admin_lock.timer);
+	if (cancel_work_sync(&resource->admin_lock.work)) {
+		kref_debug_put(&resource->kref_debug, 12);
+		kref_put(&resource->kref, drbd_destroy_resource);
+	}
+}
+
+/*
  * Returns true if every directly-connected peer_device on `resource`
  * has repl_state == L_ESTABLISHED. Disconnected peers are skipped
  * (they cannot interfere with our local view of "no resync running").
@@ -248,6 +341,7 @@ void drbd_admin_lock_twopc_commit_peer(struct drbd_resource *resource,
 		WRITE_ONCE(resource->admin_lock.generation_tid, 0);
 	}
 	seq = ++resource->admin_lock.seq;
+	drbd_admin_lock_update_watchdog(resource);
 	write_unlock_irq(&resource->state_rwlock);
 
 	drbd_info(resource,
@@ -340,6 +434,7 @@ void drbd_admin_lock_apply_peer_view(struct drbd_resource *resource,
 		WRITE_ONCE(resource->admin_lock.generation_tid,
 			   peer_held ? peer_generation_tid : 0);
 		resource->admin_lock.seq = peer_seq;
+		drbd_admin_lock_update_watchdog(resource);
 	}
 
 	write_unlock_irq(&resource->state_rwlock);

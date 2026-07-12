@@ -5747,6 +5747,7 @@ retry:
 		 * silently *adopts* whatever the peer reports - typically clobbering
 		 * the just-committed lock back to held=false. */
 		resource->admin_lock.seq++;
+		drbd_admin_lock_update_watchdog(resource);
 		write_unlock_irq(&resource->state_rwlock);
 
 		drbd_info(resource, "Committed cluster-wide admin %s %u (%ums)\n",

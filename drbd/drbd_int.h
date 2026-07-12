@@ -1083,8 +1083,11 @@ struct drbd_resource {
 	 * Acquired and released atomically across all peers via
 	 * TWOPC_ADMIN_LOCK. While held=true, all admin handlers outside
 	 * the IO-orchestration whitelist are rejected with ERR_LOCK_HELD.
-	 * There is no kernel-level timeout: lifecycle is owned by the userspace
-	 * caller (k8s controller). The fields are protected by
+	 * Lifecycle is owned by the userspace caller (k8s controller);
+	 * as a safety net against a holder that died while holding the
+	 * lock, each node force-releases its local view after
+	 * res_opts.admin_lock_hold_timeout (see
+	 * drbd_admin_lock_update_watchdog). The fields are protected by
 	 * state_rwlock on writes and by READ_ONCE() on the drbd_nl gate
 	 * read-path.
 	 *
@@ -1106,6 +1109,15 @@ struct drbd_resource {
 		int holder_node_id;
 		u32 generation_tid;
 		u64 seq;
+		/* Local hold watchdog (res_opts.admin_lock_hold_timeout):
+		 * armed whenever held becomes true on this node, disarmed
+		 * on release. deadline (jiffies) is written under
+		 * state_rwlock write and re-checked by the watchdog work,
+		 * so a newer commit that moves the deadline forward turns
+		 * a stale expiry into a no-op. */
+		unsigned long deadline;
+		struct timer_list timer;
+		struct work_struct work;
 	} admin_lock;
 
 	enum write_ordering_e write_ordering;
@@ -2579,6 +2591,15 @@ enum drbd_state_rv drbd_admin_lock_wait_for_local_drain(struct drbd_resource *re
  * Best-effort: per-peer send errors are logged but not surfaced.
  * Implemented in drbd_admin_lock.c. */
 void drbd_admin_lock_broadcast_state(struct drbd_resource *resource);
+/* Init (drbd_create_resource) / teardown (drbd_adm_del_resource) of
+ * the per-resource admin_lock hold watchdog (timer + work).
+ * Implemented in drbd_admin_lock.c. */
+void drbd_admin_lock_init(struct drbd_resource *resource);
+void drbd_admin_lock_shutdown(struct drbd_resource *resource);
+/* Arm/refresh (held && timeout != 0) or disarm the hold watchdog.
+ * Must be called with state_rwlock held for write, right after
+ * admin_lock changed. Implemented in drbd_admin_lock.c. */
+void drbd_admin_lock_update_watchdog(struct drbd_resource *resource);
 enum determine_dev_size
 drbd_commit_size_change(struct drbd_device *device, struct resize_parms *rs,
 			u64 nodes_to_reach);

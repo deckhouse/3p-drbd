@@ -6244,6 +6244,7 @@ static int drbd_adm_force_unlock(struct sk_buff *skb, struct genl_info *info)
 	WRITE_ONCE(resource->admin_lock.holder_node_id, -1);
 	WRITE_ONCE(resource->admin_lock.generation_tid, 0);
 	resource->admin_lock.seq++;
+	drbd_admin_lock_update_watchdog(resource);
 	write_unlock_irq(&resource->state_rwlock);
 
 	/* Push the new view to every connected peer that supports
@@ -7713,6 +7714,7 @@ static int adm_del_resource(struct drbd_resource *resource)
 	}
 	timer_shutdown_sync(&resource->twopc_timer);
 	timer_shutdown_sync(&resource->peer_ack_timer);
+	drbd_admin_lock_shutdown(resource);
 	call_rcu(&resource->rcu, drbd_reclaim_resource);
 
 	mutex_lock(&notification_mutex);

@@ -49,6 +49,7 @@ struct kref_debug_class kref_class_resource = {
 		[9] = "drbd_adm_dump_peer_devices()",
 		[10] = "drbd_adm_dump_paths()",
 		[11] = "drbd_empty_twopc_work_fn()",
+		[12] = "drbd_admin_lock_watchdog_work_fn()",
 	}
 };
 
