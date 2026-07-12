@@ -6089,6 +6089,26 @@ static int drbd_adm_lock(struct sk_buff *skb, struct genl_info *info)
 		goto out_unlock;
 	}
 
+	/* Quorum gate: refuse to start snapshot orchestration from a
+	 * minority partition. Only enforced when quorum is configured.
+	 * The control plane additionally checks resource health before
+	 * initiating; this is defense in depth. Peers participating in
+	 * the 2pc are by construction in the coordinator's partition,
+	 * so a coordinator-side check is sufficient. */
+	if (resource->res_opts.quorum != QOU_OFF) {
+		struct drbd_device *device;
+		int vnr;
+
+		idr_for_each_entry(&resource->devices, device, vnr) {
+			if (!device->have_quorum[NOW]) {
+				retcode = ERR_LOCK_NO_QUORUM;
+				drbd_msg_put_info(adm_ctx.reply_skb,
+					"admin_lock refused: a local device lacks quorum");
+				goto out_unlock;
+			}
+		}
+	}
+
 	/* Idempotency: if we are already the holder, accept silently.
 	 * Allows a restarted k8s controller pod to safely re-issue LOCK
 	 * for an already-acquired admin_lock without the kernel side
