@@ -1841,6 +1841,15 @@ int conn_send_twopc_request(struct drbd_connection *connection, struct twopc_req
 				cpu_to_be64(resource->twopc.resize.diskful_primary_nodes);
 			p->exposed_size = cpu_to_be64(resource->twopc.resize.new_size);
 		}
+		break;
+	case TWOPC_ADMIN_LOCK:
+		/* For PREP_LOCK / COMMIT / ABORT all carry the generation so the
+		 * peer-side prepare validator can match it against its stored
+		 * generation (otherwise unlock with a fresh transaction tid would
+		 * be rejected as cross-holder release). */
+		p->admin_lock_generation =
+			cpu_to_be32(resource->twopc.admin_lock.generation_tid);
+		break;
 	}
 	return send_command(connection, request->vnr, request->cmd, DATA_STREAM | SFLAG_FLUSH);
 }

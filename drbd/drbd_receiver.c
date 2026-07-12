@@ -8011,17 +8011,22 @@ retry:
 		}
 		break;
 	case TWOPC_ADMIN_LOCK:
-		/* No type-specific payload on the wire: tid is the new
-		 * generation, initiator_node_id is the holder, and the
-		 * lock vs unlock op is encoded in request.flags. The
-		 * reply (YES/NO) is computed below in the per-type
-		 * prepare-validation switch. */
+		/* PREP_LOCK carries: is_lock op in request.flags, holder in
+		 * initiator_node_id, and the *lock's* generation (NOT the 2pc
+		 * transaction tid!) in the dedicated admin_lock_generation
+		 * field. For unlock the coordinator passes the existing stored
+		 * generation so the peer-side validator can match it against
+		 * its own resource->admin_lock.generation_tid. For acquire it
+		 * passes the new lock instance's generation (currently chosen
+		 * by the coordinator to equal the 2pc tid, but conceptually
+		 * independent of it). */
 		if (request.cmd == P_TWOPC_PREP_LOCK) {
 			resource->twopc.admin_lock.is_lock =
 				request.flags & TWOPC_ADMIN_LOCK_OP_LOCK;
 			resource->twopc.admin_lock.holder_node_id =
 				reply->initiator_node_id;
-			resource->twopc.admin_lock.generation_tid = reply->tid;
+			resource->twopc.admin_lock.generation_tid =
+				be32_to_cpu(p->admin_lock_generation);
 		}
 		break;
 	}

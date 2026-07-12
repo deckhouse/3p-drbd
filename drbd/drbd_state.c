@@ -5677,7 +5677,14 @@ retry:
 	resource->twopc.type = TWOPC_ADMIN_LOCK;
 	resource->twopc.admin_lock.is_lock = is_lock;
 	resource->twopc.admin_lock.holder_node_id = holder_node_id;
-	resource->twopc.admin_lock.generation_tid = reply->tid;
+	/* For acquire: a new lock instance gets a fresh generation (we
+	 * reuse the 2pc tid for convenience). For release: the lock instance
+	 * already has a generation (resource->admin_lock.generation_tid);
+	 * we MUST replay it so the peer-side prepare validator matches.
+	 * Using a fresh tid here would make the peer reject the unlock as
+	 * a cross-holder release (SS_CW_FAILED_BY_PEER). */
+	resource->twopc.admin_lock.generation_tid =
+		is_lock ? reply->tid : resource->admin_lock.generation_tid;
 	resource->twopc_parent_nodes = 0;
 	resource->remote_state_change = true;
 
