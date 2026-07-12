@@ -5740,11 +5740,25 @@ retry:
 			resource->admin_lock.holder_node_id = -1;
 			resource->admin_lock.generation_tid = 0;
 		}
+		/* Bump seq in lockstep with peers (drbd_admin_lock_twopc_commit_peer
+		 * bumps too). Without this the coordinator's local seq lags behind
+		 * peers, and the next P_ADMIN_LOCK_STATE merge in
+		 * drbd_admin_lock_apply_peer_view sees peer_seq > local_seq and
+		 * silently *adopts* whatever the peer reports - typically clobbering
+		 * the just-committed lock back to held=false. */
+		resource->admin_lock.seq++;
 		write_unlock_irq(&resource->state_rwlock);
 
 		drbd_info(resource, "Committed cluster-wide admin %s %u (%ums)\n",
 			  is_lock ? "lock" : "unlock", request.tid,
 			  jiffies_to_msecs(jiffies - start_time));
+
+		/* Normalize rv: get_cluster_wide_reply returns SS_CW_SUCCESS on
+		 * peer agreement, which our public contract (and drbd_adm_lock /
+		 * drbd_adm_unlock switch) treats as an unrecognized status
+		 * (default -> ERR_INVALID_REQUEST). Userspace should see plain
+		 * success on commit. */
+		rv = SS_SUCCESS;
 	} else {
 		drbd_info(resource, "Aborted cluster-wide admin %s %u (%ums) rv=%d\n",
 			  is_lock ? "lock" : "unlock", request.tid,
