@@ -903,7 +903,7 @@ enum twopc_type {
 	 * The lock vs unlock distinction is encoded in the twopc_request
 	 * flags (TWOPC_ADMIN_LOCK_OP_LOCK / TWOPC_ADMIN_LOCK_OP_UNLOCK).
 	 * No type-specific reply payload: peers reply SS_SUCCESS or
-	 * SS_RESOURCE_LOCKED via the common return-code path. */
+	 * SS_CW_FAILED_BY_PEER via the common return-code path. */
 	TWOPC_ADMIN_LOCK,
 };
 
@@ -1082,8 +1082,8 @@ struct drbd_resource {
 	 *
 	 * Acquired and released atomically across all peers via
 	 * TWOPC_ADMIN_LOCK. While held=true, all admin handlers outside
-	 * the IO-orchestration whitelist are rejected with -EBUSY. There
-	 * is no kernel-level timeout: lifecycle is owned by the userspace
+	 * the IO-orchestration whitelist are rejected with ERR_LOCK_HELD.
+	 * There is no kernel-level timeout: lifecycle is owned by the userspace
 	 * caller (k8s controller). The fields are protected by
 	 * state_rwlock on writes and by READ_ONCE() on the drbd_nl gate
 	 * read-path.
@@ -2514,11 +2514,11 @@ bool drbd_have_local_disk(struct drbd_resource *resource);
 enum drbd_state_rv drbd_support_2pc_resize(struct drbd_resource *resource);
 /* Returns SS_SUCCESS if all currently connected peers advertise
  * DRBD_FF_ADMIN_LOCK, SS_NOT_SUPPORTED otherwise. Lives in
- * drbd_admin_lock.c (created in the kernel_admin_lock_c step). */
+ * drbd_admin_lock.c. */
 enum drbd_state_rv drbd_support_admin_lock(struct drbd_resource *resource);
 /* Cluster-wide acquire (is_lock=true) or release (is_lock=false) of
  * resource->admin_lock via TWOPC_ADMIN_LOCK. Returns SS_SUCCESS on
- * commit, SS_RESOURCE_LOCKED if a peer rejected the prepare (caller
+ * commit, SS_CW_FAILED_BY_PEER if a peer rejected the prepare (caller
  * is expected to retry with backoff after pre-checks), or other
  * SS_* codes for transport / handshake errors. Implemented in
  * drbd_state.c next to change_cluster_wide_device_size. */
@@ -2527,10 +2527,10 @@ enum drbd_state_rv change_cluster_wide_admin_lock(struct drbd_resource *resource
 						  int holder_node_id);
 /* Peer-side prepare-phase validation for an incoming TWOPC_ADMIN_LOCK.
  * Returns SS_SUCCESS if this peer is willing to participate, or a
- * negative SS_* code otherwise (e.g. SS_RESOURCE_LOCKED if the peer
+ * negative SS_* code otherwise (e.g. SS_CW_FAILED_BY_PEER if the peer
  * already holds an admin_lock with a different generation, or if any
  * local peer_device->repl_state is not Established for an acquire).
- * Implemented in drbd_admin_lock.c (kernel_admin_lock_c step). */
+ * Implemented in drbd_admin_lock.c. */
 enum drbd_state_rv drbd_admin_lock_twopc_prepare_peer(struct drbd_resource *resource,
 						      struct twopc_admin_lock *al);
 /* Peer-side commit-phase application of a TWOPC_ADMIN_LOCK transaction.

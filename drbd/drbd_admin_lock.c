@@ -5,8 +5,9 @@
  * The admin_lock is a single, per-resource boolean that, while held,
  * causes drbd_adm_prepare() to reject any administrative netlink
  * command not on a small IO-orchestration whitelist (suspend-io,
- * resume-io, track-bitmap, flush-bitmap, new-current-uuid, plus the
- * lock/unlock/force-unlock commands themselves). It is acquired and
+ * resume-io, track-bitmap, flush-bitmap, new-current-uuid, the
+ * lock/unlock/force-unlock commands themselves, plus the read-only
+ * get-* commands). It is acquired and
  * released atomically across all reachable peers via TWOPC_ADMIN_LOCK,
  * and reconciled on reconnect via the P_ADMIN_LOCK_STATE handshake
  * exchange.
@@ -25,8 +26,6 @@
  *     distinguish acquire from release.
  *   - P_ADMIN_LOCK_STATE carries the local view (held, holder,
  *     generation, seq) during state-handshake.
- *
- * See docs/dev/drbd-kernel-admin-lock-design.md for the full design.
  */
 
 #include <linux/jiffies.h>
@@ -236,24 +235,26 @@ enum drbd_state_rv drbd_admin_lock_twopc_prepare_peer(struct drbd_resource *reso
 void drbd_admin_lock_twopc_commit_peer(struct drbd_resource *resource,
 				       struct twopc_admin_lock *al)
 {
+	u64 seq;
+
 	write_lock_irq(&resource->state_rwlock);
 	if (al->is_lock) {
-		resource->admin_lock.held = true;
-		resource->admin_lock.holder_node_id = al->holder_node_id;
-		resource->admin_lock.generation_tid = al->generation_tid;
+		WRITE_ONCE(resource->admin_lock.held, true);
+		WRITE_ONCE(resource->admin_lock.holder_node_id, al->holder_node_id);
+		WRITE_ONCE(resource->admin_lock.generation_tid, al->generation_tid);
 	} else {
-		resource->admin_lock.held = false;
-		resource->admin_lock.holder_node_id = -1;
-		resource->admin_lock.generation_tid = 0;
+		WRITE_ONCE(resource->admin_lock.held, false);
+		WRITE_ONCE(resource->admin_lock.holder_node_id, -1);
+		WRITE_ONCE(resource->admin_lock.generation_tid, 0);
 	}
-	resource->admin_lock.seq++;
+	seq = ++resource->admin_lock.seq;
 	write_unlock_irq(&resource->state_rwlock);
 
 	drbd_info(resource,
 		"admin_lock %s committed (holder=%d gen=%u seq=%llu)\n",
 		al->is_lock ? "ACQUIRE" : "RELEASE",
 		al->holder_node_id, al->generation_tid,
-		(unsigned long long)resource->admin_lock.seq);
+		(unsigned long long)seq);
 }
 
 /*
@@ -301,9 +302,9 @@ int drbd_send_admin_lock_state(struct drbd_connection *connection)
 /*
  * Merge an incoming peer view with the local admin_lock state.
  *
- * Tie-break: peer_seq > local_seq → adopt peer view.
- *            peer_seq < local_seq → ignore (we are newer).
- *            peer_seq == local_seq → views must agree on (held, holder,
+ * Tie-break: peer_seq > local_seq -> adopt peer view.
+ *            peer_seq < local_seq -> ignore (we are newer).
+ *            peer_seq == local_seq -> views must agree on (held, holder,
  *            generation); any disagreement is logged as a warning and
  *            the local view is kept (caller cannot do better).
  *
@@ -333,11 +334,11 @@ void drbd_admin_lock_apply_peer_view(struct drbd_resource *resource,
 	}
 
 	if (adopt) {
-		resource->admin_lock.held = peer_held;
-		resource->admin_lock.holder_node_id =
-			peer_held ? peer_holder_node_id : -1;
-		resource->admin_lock.generation_tid =
-			peer_held ? peer_generation_tid : 0;
+		WRITE_ONCE(resource->admin_lock.held, peer_held);
+		WRITE_ONCE(resource->admin_lock.holder_node_id,
+			   peer_held ? peer_holder_node_id : -1);
+		WRITE_ONCE(resource->admin_lock.generation_tid,
+			   peer_held ? peer_generation_tid : 0);
 		resource->admin_lock.seq = peer_seq;
 	}
 

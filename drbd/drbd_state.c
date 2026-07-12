@@ -5632,7 +5632,7 @@ retry:
  *
  * Returns SS_SUCCESS on commit, SS_TIMEOUT after exhausting retries on
  * persistent SS_TIMEOUT/SS_CONCURRENT_ST_CHG, SS_NOT_SUPPORTED if any
- * peer lacks DRBD_FF_ADMIN_LOCK, SS_RESOURCE_LOCKED if a peer denied
+ * peer lacks DRBD_FF_ADMIN_LOCK, SS_CW_FAILED_BY_PEER if a peer denied
  * the prepare (e.g. because its repl_state is not Established).
  */
 enum drbd_state_rv
@@ -5732,13 +5732,13 @@ retry:
 	if (commit_it) {
 		write_lock_irq(&resource->state_rwlock);
 		if (is_lock) {
-			resource->admin_lock.held = true;
-			resource->admin_lock.holder_node_id = holder_node_id;
-			resource->admin_lock.generation_tid = reply->tid;
+			WRITE_ONCE(resource->admin_lock.held, true);
+			WRITE_ONCE(resource->admin_lock.holder_node_id, holder_node_id);
+			WRITE_ONCE(resource->admin_lock.generation_tid, reply->tid);
 		} else {
-			resource->admin_lock.held = false;
-			resource->admin_lock.holder_node_id = -1;
-			resource->admin_lock.generation_tid = 0;
+			WRITE_ONCE(resource->admin_lock.held, false);
+			WRITE_ONCE(resource->admin_lock.holder_node_id, -1);
+			WRITE_ONCE(resource->admin_lock.generation_tid, 0);
 		}
 		/* Bump seq in lockstep with peers (drbd_admin_lock_twopc_commit_peer
 		 * bumps too). Without this the coordinator's local seq lags behind

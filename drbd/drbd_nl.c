@@ -6045,7 +6045,7 @@ out:
  *
  * The lock is whitelisted in drbd_adm_prepare's gate (see
  * drbd_admin_lock_blocks), so these three handlers are reachable even
- * when the lock is already held — that lets us implement idempotent
+ * when the lock is already held - that lets us implement idempotent
  * acquire (returns NO_ERROR if we are already the holder), reject
  * acquire when somebody else holds it (ERR_LOCK_HELD), and validate
  * holder/generation on release.
@@ -6240,9 +6240,9 @@ static int drbd_adm_force_unlock(struct sk_buff *skb, struct genl_info *info)
 	 * that. state_rwlock orders the write against any concurrent
 	 * reader of admin_lock. */
 	write_lock_irq(&resource->state_rwlock);
-	resource->admin_lock.held = false;
-	resource->admin_lock.holder_node_id = -1;
-	resource->admin_lock.generation_tid = 0;
+	WRITE_ONCE(resource->admin_lock.held, false);
+	WRITE_ONCE(resource->admin_lock.holder_node_id, -1);
+	WRITE_ONCE(resource->admin_lock.generation_tid, 0);
 	resource->admin_lock.seq++;
 	write_unlock_irq(&resource->state_rwlock);
 
