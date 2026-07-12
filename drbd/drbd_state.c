@@ -4748,7 +4748,8 @@ __cluster_wide_request(struct drbd_resource *resource, struct twopc_request *req
 			wake_up(&resource->work.q_wait);
 			continue;
 		}
-		if (cmd == P_TWOPC_PREPARE || cmd == P_TWOPC_PREP_RSZ)
+		if (cmd == P_TWOPC_PREPARE || cmd == P_TWOPC_PREP_RSZ ||
+		    cmd == P_TWOPC_PREP_LOCK)
 			drbd_queue_ping(connection);
 		rv = SS_CW_SUCCESS;
 	}
@@ -5843,7 +5844,8 @@ nested_twopc_request(struct drbd_resource *resource, struct twopc_request *reque
 
 	rv = __cluster_wide_request(resource, request, reach_immediately);
 	have_peers = rv == SS_CW_SUCCESS;
-	if (cmd == P_TWOPC_PREPARE || cmd == P_TWOPC_PREP_RSZ) {
+	if (cmd == P_TWOPC_PREPARE || cmd == P_TWOPC_PREP_RSZ ||
+	    cmd == P_TWOPC_PREP_LOCK) {
 		if (rv < SS_SUCCESS)
 			twopc_end_nested(resource, P_TWOPC_NO);
 		else if (!have_peers && cluster_wide_reply_ready(resource)) /* no nested nodes */
