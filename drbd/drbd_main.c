@@ -103,6 +103,20 @@ char drbd_usermode_helper[80] = "/sbin/drbdadm";
 module_param_named(minor_count, drbd_minor_count, uint, 0444);
 module_param_string(usermode_helper, drbd_usermode_helper, sizeof(drbd_usermode_helper), 0644);
 
+/* --- RACEDBG (flant.12 diagnosis build, stress/problems/05) ----------------
+ * Artificial delays (milliseconds) that widen the resync re-handshake vs
+ * resync_again drop-wedge race window so the stuck-resync race reproduces more
+ * often and can be seen in the kernel log. 0 = disabled. Writable at runtime:
+ *   /sys/module/drbd/parameters/racedbg_delay_rehs_ms
+ *   /sys/module/drbd/parameters/racedbg_delay_bmfork_ms
+ * The mere existence of these files proves the instrumented build is loaded. */
+int drbd_racedbg_delay_rehs_ms;			/* off by default (uncertain sign) */
+int drbd_racedbg_delay_bmfork_ms = 100;		/* delays convergence fork */
+module_param_named(racedbg_delay_rehs_ms, drbd_racedbg_delay_rehs_ms, int, 0644);
+module_param_named(racedbg_delay_bmfork_ms, drbd_racedbg_delay_bmfork_ms, int, 0644);
+MODULE_PARM_DESC(racedbg_delay_rehs_ms, "RACEDBG: ms delay before after-unstable resync state change");
+MODULE_PARM_DESC(racedbg_delay_bmfork_ms, "RACEDBG: ms delay before receive_bitmap convergence fork");
+
 static int param_set_drbd_protocol_version(const char *s, const struct kernel_param *kp)
 {
 	unsigned long long tmp;
@@ -4586,6 +4600,9 @@ static int __init drbd_init(void)
 	       "Version: " REL_VERSION " (api:%d/proto:%d-%d)\n",
 	       GENL_MAGIC_VERSION, PRO_VERSION_MIN, PRO_VERSION_MAX);
 	pr_info("%s\n", drbd_buildtag());
+	pr_info("RACEDBG build loaded: flant.12 oos-guard drop-wedge diagnosis "
+		"(stress/problems/05); racedbg_delay_rehs_ms=%d racedbg_delay_bmfork_ms=%d\n",
+		drbd_racedbg_delay_rehs_ms, drbd_racedbg_delay_bmfork_ms);
 	pr_info("registered as block device major %d\n", DRBD_MAJOR);
 
 #ifdef CONFIG_DRBD_COMPAT_84

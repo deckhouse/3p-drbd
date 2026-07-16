@@ -1689,6 +1689,12 @@ static void resync_again(struct drbd_device *device, u64 source_m, u64 target_m)
 			 * (late acks from in-flight writes). Skip if bitmap
 			 * is already clean — nothing to resync. */
 			if (oos == 0) {
+				drbd_info(peer_device,
+					  "RACEDBG resync_again DROP: oos==0 resync_again=%d source_m=%llx target_m=%llx node_m=%llx -> postponed WFBitMap dropped (drop-wedge)\n",
+					  peer_device->resync_again,
+					  (unsigned long long)source_m,
+					  (unsigned long long)target_m,
+					  (unsigned long long)m);
 				peer_device->resync_again = 0;
 				continue;
 			}
@@ -1697,6 +1703,11 @@ static void resync_again(struct drbd_device *device, u64 source_m, u64 target_m)
 				source_m & m ? L_WF_BITMAP_S :
 				target_m & m ? L_WF_BITMAP_T :
 				L_ESTABLISHED;
+
+			drbd_info(peer_device,
+				  "RACEDBG resync_again CONSUME: oos=%lu resync_again=%d -> %s\n",
+				  oos, peer_device->resync_again,
+				  drbd_repl_str(new_repl_state));
 
 			if (new_repl_state != L_ESTABLISHED) {
 				peer_device->resync_again--;

@@ -1,6 +1,6 @@
 Name: drbd-kernel
 Summary: Kernel driver for DRBD
-Version: 9.2.19~flant.10
+Version: 9.2.19~flant.12
 Release: 1
 
 # always require a suitable userland
@@ -232,6 +232,8 @@ dkms remove -m $DKMS_NAME -v $DKMS_VERSION -q --all --rpm_safe_upgrade || :
 %endif
 
 %changelog
+* Thu Jul 16 2026 Flant <aleksandr.stefurishin@flant.com> - 9.2.19~flant.12
+-  Revert "fix data corruption risk when resync finishes with new out-of-sync blocks" (6fe5d9dd9): the oos==0 guard in resync_again dropped a postponed WFBitMapS needed for generation reconciliation in the diskless-primary re-handshake race, causing stuck resync after node reboot. Test build to validate root cause.
 * Thu Jul 09 2026 Flant <aleksandr.stefurishin@flant.com> - 9.2.19~flant.10
 -  Fix bitmap leak in drbd_adm_attach() on early attach failure: free device->bitmap on the attach error paths so a replica does not get permanently stuck Diskless with "already has a bitmap, this should not happen" (backport of the fix shape from upstream 9.3.3 commit 8c279459a)
 

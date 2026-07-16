@@ -6589,6 +6589,19 @@ static void drbd_resync(struct drbd_peer_device *peer_device,
 		return;
 	}
 
+	/* RACEDBG: widen the window in which a concurrent resync is still active
+	 * when this after-unstable re-handshake tries to (re-)enter WFBitMap*,
+	 * so the SS_RESYNC_RUNNING postpone (and the subsequent resync_again
+	 * drop-wedge) reproduces more often. See stress/problems/05. */
+	if (drbd_racedbg_delay_rehs_ms && reason == AFTER_UNSTABLE &&
+	    (new_repl_state == L_WF_BITMAP_S || new_repl_state == L_WF_BITMAP_T)) {
+		drbd_info(peer_device,
+			  "RACEDBG rehs delay %dms before change_repl_state(%s) [%s]\n",
+			  drbd_racedbg_delay_rehs_ms,
+			  drbd_repl_str(new_repl_state), tag);
+		schedule_timeout_interruptible(msecs_to_jiffies(drbd_racedbg_delay_rehs_ms));
+	}
+
 	rv = change_repl_state(peer_device, new_repl_state, CS_VERBOSE, tag);
 	if ((rv == SS_NOTHING_TO_DO || rv == SS_RESYNC_RUNNING) &&
 	    (new_repl_state == L_WF_BITMAP_S || new_repl_state == L_WF_BITMAP_T)) {
@@ -6596,7 +6609,10 @@ static void drbd_resync(struct drbd_peer_device *peer_device,
 		   the previous resync we need to re-enter that state. Schedule sending of
 		   the bitmap here explicitly */
 		peer_device->resync_again++;
-		drbd_info(peer_device, "...postponing this until current resync finished\n");
+		drbd_info(peer_device,
+			  "RACEDBG postpone: rv=%d new=%s [%s] resync_again=%d (resync already active) ...postponing until current resync finished\n",
+			  rv, drbd_repl_str(new_repl_state), tag,
+			  peer_device->resync_again);
 	}
 }
 
@@ -9199,6 +9215,21 @@ static int receive_bitmap(struct drbd_connection *connection, struct packet_info
 	drbd_bm_slot_unlock(peer_device);
 	put_ldev(device);
 
+	/* RACEDBG: log the convergence-vs-resync fork inputs for this resource and
+	 * delay it, so concurrent events (resync_again drop, stable-source flap)
+	 * can preempt the "promote to UpToDate" convergence exit — reproducing the
+	 * stuck resync more often. See stress/problems/05. */
+	if (drbd_racedbg_delay_bmfork_ms) {
+		drbd_info(peer_device,
+			  "RACEDBG bmfork: repl=%s disk=%s oos=%lu stable_src=%d delay %dms before convergence fork\n",
+			  drbd_repl_str(repl_state),
+			  drbd_disk_str(device->disk_state[NOW]),
+			  drbd_bm_total_weight(peer_device),
+			  drbd_stable_sync_source_present(peer_device, NOW),
+			  drbd_racedbg_delay_bmfork_ms);
+		schedule_timeout_interruptible(msecs_to_jiffies(drbd_racedbg_delay_bmfork_ms));
+	}
+
 	if (test_bit(B_RS_H_DONE, &peer_device->flags)) {
 		/* We have entered drbd_start_resync() since starting the bitmap exchange. */
 		drbd_warn(peer_device, "Received bitmap more than once; ignoring\n");
@@ -9218,6 +9249,8 @@ static int receive_bitmap(struct drbd_connection *connection, struct packet_info
 		}
 	} else if (repl_state == L_ESTABLISHED && drbd_bm_total_weight(peer_device) > 0) {
 		/* Unstable re-handshake: start resync as Target */
+		drbd_info(peer_device, "RACEDBG bmfork -> unstable-rehandshake SyncTarget (oos=%lu)\n",
+			  drbd_bm_total_weight(peer_device));
 		drbd_start_resync(peer_device, L_SYNC_TARGET, "unstable-rehandshake");
 	} else if (repl_state == L_ESTABLISHED && device->disk_state[NOW] == D_INCONSISTENT &&
 		   drbd_stable_sync_source_present(peer_device, NOW)) {
@@ -9225,7 +9258,7 @@ static int receive_bitmap(struct drbd_connection *connection, struct packet_info
 		 * stable source (Primary with L_ESTABLISHED) is present.
 		 * Bitmap is clean, all data is consistent. Promote disk. */
 		drbd_info(peer_device,
-			  "Re-handshake bitmap clean, stable source present "
+			  "RACEDBG bmfork -> CONVERGE: bitmap clean, stable source present "
 			  "— promoting to UpToDate\n");
 		change_disk_state(device, D_UP_TO_DATE, CS_VERBOSE,
 				  "unstable-rehandshake-promote", NULL);
@@ -9234,6 +9267,14 @@ static int receive_bitmap(struct drbd_connection *connection, struct packet_info
 		 * other threads may have noticed network errors */
 		drbd_info(peer_device, "unexpected repl_state (%s) in receive_bitmap\n",
 			  drbd_repl_str(repl_state));
+	} else {
+		/* repl==Established, bitmap clean, but NOT promoted (disk not
+		 * Inconsistent or no stable source at this instant). Convergence
+		 * missed — this is the stuck-resync fall-through. */
+		drbd_info(peer_device,
+			  "RACEDBG bmfork -> FELL THROUGH (no resync, no promote): disk=%s stable_src=%d — convergence MISSED (stuck-resync)\n",
+			  drbd_disk_str(device->disk_state[NOW]),
+			  drbd_stable_sync_source_present(peer_device, NOW));
 	}
 
 	return 0;

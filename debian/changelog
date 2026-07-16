@@ -1,3 +1,9 @@
+drbd (9.2.19~flant.12-1) unstable; urgency=medium
+
+  * DIAGNOSIS BUILD (not for production). Identical code to 9.2.19-flant.10 plus RACEDBG instrumentation to pin the stuck-resync race (stress/problems/05): kernel logs at the resync_again oos==0 drop, the after-unstable re-handshake postpone, and the receive_bitmap convergence-vs-resync fork; plus tunable artificial delays (module params racedbg_delay_rehs_ms, racedbg_delay_bmfork_ms) that widen the race window. Presence of /sys/module/drbd/parameters/racedbg_delay_* proves this build is loaded.
+
+ -- Flant <aleksandr.stefurishin@flant.com>  Thu, 16 Jul 2026 18:45:00 +0300
+
 drbd (9.2.19~flant.10-1) unstable; urgency=medium
 
   * Fix bitmap leak in drbd_adm_attach() on early attach failure: free device->bitmap on the attach error paths so a replica does not get permanently stuck Diskless with "already has a bitmap, this should not happen" (backport of the fix shape from upstream 9.3.3 commit 8c279459a)
