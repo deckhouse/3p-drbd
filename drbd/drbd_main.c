@@ -4586,8 +4586,8 @@ static int __init drbd_init(void)
 	       "Version: " REL_VERSION " (api:%d/proto:%d-%d)\n",
 	       GENL_MAGIC_VERSION, PRO_VERSION_MIN, PRO_VERSION_MAX);
 	pr_info("%s\n", drbd_buildtag());
-	pr_info("RACEDBG build loaded: flant.13 stuck-resync LOGS ONLY "
-		"(no artificial delays, no throttle; stress/problems/05)\n");
+	pr_info("RACEDBG build loaded: flant.14 stuck-resync FIX cancel-on-pause "
+		"(+ logs; no delays/throttle; stress/results/run-11)\n");
 	pr_info("registered as block device major %d\n", DRBD_MAJOR);
 
 #ifdef CONFIG_DRBD_COMPAT_84

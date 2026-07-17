@@ -1,6 +1,6 @@
 Name: drbd-kernel
 Summary: Kernel driver for DRBD
-Version: 9.2.19~flant.13
+Version: 9.2.19~flant.14
 Release: 1
 
 # always require a suitable userland
@@ -232,6 +232,8 @@ dkms remove -m $DKMS_NAME -v $DKMS_VERSION -q --all --rpm_safe_upgrade || :
 %endif
 
 %changelog
+* Sat Jul 18 2026 Flant <aleksandr.stefurishin@flant.com> - 9.2.19~flant.14
+-  Fix multi-source resync deadlock (stress/results/run-11): when a device is resynced from two peers, drbd_select_sync_target() pauses one (L_PAUSED_SYNC_T); its already-sent resync requests never complete (resync-suspended:peer) yet keep blocking the active source's resync write for the same block via the conflict rule, so the resync freezes at done:X%. On entering L_PAUSED_SYNC_T, drbd_cancel_paused_resync_requests() now drops the paused peer's dangling (sent, not-received) resync requests and releases the writes parked behind them. Keeps flant.13 logs; no delays/throttle.
 * Fri Jul 17 2026 Flant <aleksandr.stefurishin@flant.com> - 9.2.19~flant.13
 -  DIAGNOSIS BUILD (not for production). Identical code to 9.2.19-flant.10 plus LOGS-ONLY RACEDBG instrumentation for the stuck-resync race (stress/problems/05): kernel logs at the resync_again oos==0 drop, the after-unstable re-handshake postpone, and the receive_bitmap convergence-vs-resync fork. No artificial delays, no throttle (flant.12's delays removed so they cannot mask the real bug).
 * Thu Jul 16 2026 Flant <aleksandr.stefurishin@flant.com> - 9.2.19~flant.12

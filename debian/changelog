@@ -1,3 +1,9 @@
+drbd (9.2.19~flant.14-1) unstable; urgency=medium
+
+  * Fix multi-source resync deadlock (stress/results/run-11): a source paused by the one-active-target-per-device serialization (L_PAUSED_SYNC_T) leaves dangling resync requests that never complete and block the active source's resync of the same blocks, freezing the resync at done:X%. drbd_cancel_paused_resync_requests() (called on entering L_PAUSED_SYNC_T) drops them and releases the parked writes. Retains flant.13 logs; no delays/throttle.
+
+ -- Flant <aleksandr.stefurishin@flant.com>  Sat, 18 Jul 2026 00:55:00 +0300
+
 drbd (9.2.19~flant.13-1) unstable; urgency=medium
 
   * DIAGNOSIS BUILD (not for production). Identical code to 9.2.19-flant.10 plus LOGS-ONLY RACEDBG instrumentation to observe the stuck-resync race (stress/problems/05): kernel logs at the resync_again oos==0 drop, the after-unstable re-handshake postpone, and the receive_bitmap convergence-vs-resync fork. Removes flant.12's artificial delays (racedbg_delay_rehs_ms/bmfork_ms) entirely so they cannot mask the real bug. No throttle.

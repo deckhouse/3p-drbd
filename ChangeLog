@@ -2,6 +2,10 @@ Latest:
 ------
  For even more detail, use "git log" or visit https://github.com/LINBIT/drbd/commits/master.
 
+9.2.19-flant.14 (api:genl2/proto:86-101,118-124/transport:21)
+--------
+ * Fix multi-source resync deadlock (stress/results/run-11). When a device is resynced from two peers at once, drbd_select_sync_target() keeps one active L_SYNC_TARGET and forces the other to L_PAUSED_SYNC_T. The paused source stops delivering replies (resync-suspended:peer), so a resync request already sent to it never completes, and via the conflict rule in drbd_should_defer_to_interval() it permanently blocks the ACTIVE source's resync write for the same block -> the resync freezes at done:X% (~5% of replicas after a node reboot). New drbd_cancel_paused_resync_requests(), called from w_after_state_change() when a peer enters L_PAUSED_SYNC_T, drops that peer's dangling (sent, not-yet-received) resync requests and releases the writes parked behind them; the blocks stay out-of-sync and are resynced by the active source or when the peer resumes. Retains the flant.13 diagnostic logs; no artificial delays, no throttle.
+
 9.2.19-flant.13 (api:genl2/proto:86-101,118-124/transport:21)
 --------
  * DIAGNOSIS BUILD (not for production). Identical code to 9.2.19-flant.10 plus LOGS-ONLY RACEDBG instrumentation to observe the stuck-resync race (stress/problems/05): kernel logs at the resync_again oos==0 drop, the after-unstable re-handshake postpone, and the receive_bitmap convergence-vs-resync fork. Removes flant.12's artificial delays (racedbg_delay_rehs_ms/bmfork_ms) entirely — they perturbed timing and could mask the real bug. No throttle.
