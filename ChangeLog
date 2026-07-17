@@ -2,6 +2,10 @@ Latest:
 ------
  For even more detail, use "git log" or visit https://github.com/LINBIT/drbd/commits/master.
 
+9.2.19-flant.13 (api:genl2/proto:86-101,118-124/transport:21)
+--------
+ * DIAGNOSIS BUILD (not for production). Identical code to 9.2.19-flant.10 plus LOGS-ONLY RACEDBG instrumentation to observe the stuck-resync race (stress/problems/05): kernel logs at the resync_again oos==0 drop, the after-unstable re-handshake postpone, and the receive_bitmap convergence-vs-resync fork. Removes flant.12's artificial delays (racedbg_delay_rehs_ms/bmfork_ms) entirely — they perturbed timing and could mask the real bug. No throttle.
+
 9.2.19-flant.12 (api:genl2/proto:86-101,118-124/transport:21)
 --------
  * DIAGNOSIS BUILD (not for production). Identical code to 9.2.19-flant.10 plus RACEDBG instrumentation to pin the stuck-resync race (stress/problems/05): kernel logs at the resync_again oos==0 drop, the after-unstable re-handshake postpone, and the receive_bitmap convergence-vs-resync fork; plus tunable artificial delays (module params racedbg_delay_rehs_ms, racedbg_delay_bmfork_ms) that widen the race window so the wedge reproduces more often. The presence of /sys/module/drbd/parameters/racedbg_delay_* proves this build is loaded.

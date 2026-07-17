@@ -2294,9 +2294,6 @@ void drbd_start_resync(struct drbd_peer_device *peer_device,
 void resume_next_sg(struct drbd_device *device);
 void suspend_other_sg(struct drbd_device *device);
 void drbd_apply_resync_max_parallel(void);
-/* RACEDBG (flant.12 diagnosis build) tunables — defined in drbd_main.c */
-extern int drbd_racedbg_delay_rehs_ms;
-extern int drbd_racedbg_delay_bmfork_ms;
 void drbd_resync_finished(struct drbd_peer_device *peer_device,
 			  enum drbd_disk_state new_peer_disk_state);
 void verify_progress(struct drbd_peer_device *peer_device,

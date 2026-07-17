@@ -6589,19 +6589,6 @@ static void drbd_resync(struct drbd_peer_device *peer_device,
 		return;
 	}
 
-	/* RACEDBG: widen the window in which a concurrent resync is still active
-	 * when this after-unstable re-handshake tries to (re-)enter WFBitMap*,
-	 * so the SS_RESYNC_RUNNING postpone (and the subsequent resync_again
-	 * drop-wedge) reproduces more often. See stress/problems/05. */
-	if (drbd_racedbg_delay_rehs_ms && reason == AFTER_UNSTABLE &&
-	    (new_repl_state == L_WF_BITMAP_S || new_repl_state == L_WF_BITMAP_T)) {
-		drbd_info(peer_device,
-			  "RACEDBG rehs delay %dms before change_repl_state(%s) [%s]\n",
-			  drbd_racedbg_delay_rehs_ms,
-			  drbd_repl_str(new_repl_state), tag);
-		schedule_timeout_interruptible(msecs_to_jiffies(drbd_racedbg_delay_rehs_ms));
-	}
-
 	rv = change_repl_state(peer_device, new_repl_state, CS_VERBOSE, tag);
 	if ((rv == SS_NOTHING_TO_DO || rv == SS_RESYNC_RUNNING) &&
 	    (new_repl_state == L_WF_BITMAP_S || new_repl_state == L_WF_BITMAP_T)) {
@@ -9215,20 +9202,13 @@ static int receive_bitmap(struct drbd_connection *connection, struct packet_info
 	drbd_bm_slot_unlock(peer_device);
 	put_ldev(device);
 
-	/* RACEDBG: log the convergence-vs-resync fork inputs for this resource and
-	 * delay it, so concurrent events (resync_again drop, stable-source flap)
-	 * can preempt the "promote to UpToDate" convergence exit — reproducing the
-	 * stuck resync more often. See stress/problems/05. */
-	if (drbd_racedbg_delay_bmfork_ms) {
-		drbd_info(peer_device,
-			  "RACEDBG bmfork: repl=%s disk=%s oos=%lu stable_src=%d delay %dms before convergence fork\n",
-			  drbd_repl_str(repl_state),
-			  drbd_disk_str(device->disk_state[NOW]),
-			  drbd_bm_total_weight(peer_device),
-			  drbd_stable_sync_source_present(peer_device, NOW),
-			  drbd_racedbg_delay_bmfork_ms);
-		schedule_timeout_interruptible(msecs_to_jiffies(drbd_racedbg_delay_bmfork_ms));
-	}
+	/* RACEDBG: log the convergence-vs-resync fork inputs (LOGS ONLY, no delay). */
+	drbd_info(peer_device,
+		  "RACEDBG bmfork: repl=%s disk=%s oos=%lu stable_src=%d (convergence fork)\n",
+		  drbd_repl_str(repl_state),
+		  drbd_disk_str(device->disk_state[NOW]),
+		  drbd_bm_total_weight(peer_device),
+		  drbd_stable_sync_source_present(peer_device, NOW));
 
 	if (test_bit(B_RS_H_DONE, &peer_device->flags)) {
 		/* We have entered drbd_start_resync() since starting the bitmap exchange. */

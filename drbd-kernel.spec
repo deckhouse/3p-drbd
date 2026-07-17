@@ -1,6 +1,6 @@
 Name: drbd-kernel
 Summary: Kernel driver for DRBD
-Version: 9.2.19~flant.12
+Version: 9.2.19~flant.13
 Release: 1
 
 # always require a suitable userland
@@ -232,6 +232,8 @@ dkms remove -m $DKMS_NAME -v $DKMS_VERSION -q --all --rpm_safe_upgrade || :
 %endif
 
 %changelog
+* Fri Jul 17 2026 Flant <aleksandr.stefurishin@flant.com> - 9.2.19~flant.13
+-  DIAGNOSIS BUILD (not for production). Identical code to 9.2.19-flant.10 plus LOGS-ONLY RACEDBG instrumentation for the stuck-resync race (stress/problems/05): kernel logs at the resync_again oos==0 drop, the after-unstable re-handshake postpone, and the receive_bitmap convergence-vs-resync fork. No artificial delays, no throttle (flant.12's delays removed so they cannot mask the real bug).
 * Thu Jul 16 2026 Flant <aleksandr.stefurishin@flant.com> - 9.2.19~flant.12
 -  Revert "fix data corruption risk when resync finishes with new out-of-sync blocks" (6fe5d9dd9): the oos==0 guard in resync_again dropped a postponed WFBitMapS needed for generation reconciliation in the diskless-primary re-handshake race, causing stuck resync after node reboot. Test build to validate root cause.
 * Thu Jul 09 2026 Flant <aleksandr.stefurishin@flant.com> - 9.2.19~flant.10
