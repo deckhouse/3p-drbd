@@ -521,6 +521,74 @@ void drbd_release_conflicts(struct drbd_device *device, struct drbd_interval *re
 		queue_work(submit_conflict->wq, &submit_conflict->worker);
 }
 
+/* Cancel-on-pause (stress/results/run-11 ROOT-CAUSE).
+ *
+ * A device may be resynced from several peers, but drbd_select_sync_target()
+ * keeps only ONE active L_SYNC_TARGET per device and forces the others to
+ * L_PAUSED_SYNC_T. A source that is paused this way stops delivering replies
+ * (it goes resync-suspended:peer), so any resync request we already sent to it
+ * ("ready-to-send", reply not yet received) will never complete. Worse, that
+ * dangling request keeps blocking the ACTIVE source's resync write for the same
+ * block via the conflict rule in drbd_should_defer_to_interval(), because
+ * drbd_release_conflicts() only re-drives a parked write when a *conflicting*
+ * interval completes -> the resync deadlocks at done:X%.
+ *
+ * When a peer is paused, drop its dangling (sent, not-yet-received) resync
+ * requests and release the writes parked behind them. The affected blocks stay
+ * out-of-sync in the bitmap and are resynced by the active source, or by this
+ * peer itself once it resumes. */
+void drbd_cancel_paused_resync_requests(struct drbd_peer_device *peer_device)
+{
+	struct drbd_device *device = peer_device->device;
+	struct rb_node *node, *next;
+	LIST_HEAD(cleanup);
+	struct drbd_peer_request *peer_req, *t;
+	int count = 0;
+
+	spin_lock_irq(&device->interval_lock);
+	for (node = rb_first(&device->requests); node; node = next) {
+		struct drbd_interval *i = rb_entry(node, struct drbd_interval, rb);
+
+		next = rb_next(node);
+
+		if (!drbd_interval_is_resync(i))
+			continue;
+
+		peer_req = container_of(i, struct drbd_peer_request, i);
+		if (peer_req->peer_device != peer_device)
+			continue;
+
+		/* Only the dangling "request sent, reply not yet received" ones.
+		 * inc_rs_pending() was done when they were sent, so dec_rs_pending()
+		 * below is balanced. Received (parked) or already submitted requests
+		 * carry data / different accounting and are left alone. */
+		if (!test_bit(INTERVAL_READY_TO_SEND, &i->flags) ||
+		    test_bit(INTERVAL_RECEIVED, &i->flags) ||
+		    test_bit(INTERVAL_SUBMITTED, &i->flags) ||
+		    test_bit(INTERVAL_CANCELED, &i->flags))
+			continue;
+
+		/* Re-drive writes deferred behind this request first (while it is
+		 * still in the tree), then remove it. */
+		drbd_release_conflicts(device, i);
+		drbd_remove_interval(&device->requests, i);
+		list_add(&peer_req->w.list, &cleanup);
+		count++;
+	}
+	spin_unlock_irq(&device->interval_lock);
+
+	list_for_each_entry_safe(peer_req, t, &cleanup, w.list) {
+		list_del(&peer_req->w.list);
+		dec_rs_pending(peer_device);
+		drbd_free_peer_req(peer_req);
+	}
+
+	if (count)
+		drbd_info(peer_device,
+			  "cancel-on-pause: dropped %d dangling resync request(s) to unblock the active source\n",
+			  count);
+}
+
 /* Helper for __req_mod().
  * Set m->bio to the master bio, if it is fit to be completed,
  * or leave it alone (it is initialized to NULL in __req_mod),

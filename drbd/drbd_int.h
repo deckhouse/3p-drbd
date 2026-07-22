@@ -2450,6 +2450,7 @@ int drbd_free_peer_reqs(struct drbd_connection *connection,
 struct drbd_peer_request *drbd_alloc_peer_req(struct drbd_peer_device *peer_device,
 					      gfp_t gfp_mask);
 void drbd_free_peer_req(struct drbd_peer_request *peer_req);
+void drbd_cancel_paused_resync_requests(struct drbd_peer_device *peer_device);
 int drbd_connected(struct drbd_peer_device *peer_device);
 void conn_connect2(struct drbd_connection *connection);
 void wait_initial_states_received(struct drbd_connection *connection);
