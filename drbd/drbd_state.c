@@ -4078,6 +4078,14 @@ static int w_after_state_change(struct drbd_work *w, int unused)
 				state_change_word(state_change, n_device, n_connection, NEW);
 			bool send_uuids, send_state = false;
 
+			/* Cancel-on-pause: when a resync source is paused by the
+			 * one-active-target-per-device serialization, drop its dangling
+			 * resync requests so they stop blocking the active source
+			 * (stress/results/run-11 ROOT-CAUSE). */
+			if (repl_state[OLD] != L_PAUSED_SYNC_T &&
+			    repl_state[NEW] == L_PAUSED_SYNC_T)
+				drbd_cancel_paused_resync_requests(peer_device);
+
 			/* In case we finished a resync as resync-target update all neighbors
 			 * about having a bitmap_uuid of 0 towards the previous sync-source.
 			 * That needs to go out before sending the new disk state

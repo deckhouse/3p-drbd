@@ -1,3 +1,9 @@
+drbd (9.2.19~flant.11-1) unstable; urgency=medium
+
+  * Fix multi-source resync conflict deadlock (cancel-on-pause): when a device resyncs from two peers and drbd_select_sync_target() pauses one to L_PAUSED_SYNC_T, its already-sent resync request never completes (resync-suspended:peer) and blocks the active source's resync of the same block, freezing the resync at done:X% (~5% of replicas after a node reboot). drbd_cancel_paused_resync_requests() drops the paused peer's dangling requests and releases the parked writes.
+
+ -- Flant <aleksandr.stefurishin@flant.com>  Thu, 23 Jul 2026 02:41:00 +0300
+
 drbd (9.2.19~flant.10-1) unstable; urgency=medium
 
   * Fix bitmap leak in drbd_adm_attach() on early attach failure: free device->bitmap on the attach error paths so a replica does not get permanently stuck Diskless with "already has a bitmap, this should not happen" (backport of the fix shape from upstream 9.3.3 commit 8c279459a)

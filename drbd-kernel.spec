@@ -1,6 +1,6 @@
 Name: drbd-kernel
 Summary: Kernel driver for DRBD
-Version: 9.2.19~flant.10
+Version: 9.2.19~flant.11
 Release: 1
 
 # always require a suitable userland
@@ -232,6 +232,9 @@ dkms remove -m $DKMS_NAME -v $DKMS_VERSION -q --all --rpm_safe_upgrade || :
 %endif
 
 %changelog
+* Thu Jul 23 2026 Flant <aleksandr.stefurishin@flant.com> - 9.2.19~flant.11
+-  Fix multi-source resync conflict deadlock (cancel-on-pause). When a device is resynced from two peers at once, drbd_select_sync_target() keeps one active L_SYNC_TARGET and forces the other to L_PAUSED_SYNC_T; the paused source goes resync-suspended:peer and never delivers replies, so a resync request already sent to it stays ready-to-send forever and, via the conflict rule in drbd_should_defer_to_interval(), permanently blocks the active source's resync write for the same block -> resync freezes at done:X% (~5% of replicas after a node reboot). New drbd_cancel_paused_resync_requests(), called from w_after_state_change() when a peer enters L_PAUSED_SYNC_T, drops that peer's dangling (sent, not-yet-received) resync requests and releases the writes parked behind them.
+
 * Thu Jul 09 2026 Flant <aleksandr.stefurishin@flant.com> - 9.2.19~flant.10
 -  Fix bitmap leak in drbd_adm_attach() on early attach failure: free device->bitmap on the attach error paths so a replica does not get permanently stuck Diskless with "already has a bitmap, this should not happen" (backport of the fix shape from upstream 9.3.3 commit 8c279459a)
 
