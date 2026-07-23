@@ -1,3 +1,9 @@
+drbd (9.2.19~flant.12-1) unstable; urgency=medium
+
+  * Fix stuck resync after reboot during bitmap (metadata) exchange: the flant oos==0 guard in resync_again() (6fe5d9dd9) dropped a postponed WF_BITMAP_S/T re-entry needed for data-generation (UUID) reconciliation after a re-handshake, so the sync target waited forever in L_WF_BITMAP_T while the source stayed L_ESTABLISHED. The oos==0 skip now applies only when there is no sync direction (L_ESTABLISHED); a pending WF_BITMAP re-entry proceeds regardless of oos. The corruption guard from 6fe5d9dd9 in drbd_resync_finished() is unchanged.
+
+ -- Flant <aleksandr.stefurishin@flant.com>  Thu, 23 Jul 2026 03:21:00 +0300
+
 drbd (9.2.19~flant.11-1) unstable; urgency=medium
 
   * Fix multi-source resync conflict deadlock (cancel-on-pause): when a device resyncs from two peers and drbd_select_sync_target() pauses one to L_PAUSED_SYNC_T, its already-sent resync request never completes (resync-suspended:peer) and blocks the active source's resync of the same block, freezing the resync at done:X% (~5% of replicas after a node reboot). drbd_cancel_paused_resync_requests() drops the paused peer's dangling requests and releases the parked writes.

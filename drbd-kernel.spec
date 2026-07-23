@@ -1,6 +1,6 @@
 Name: drbd-kernel
 Summary: Kernel driver for DRBD
-Version: 9.2.19~flant.11
+Version: 9.2.19~flant.12
 Release: 1
 
 # always require a suitable userland
@@ -232,6 +232,9 @@ dkms remove -m $DKMS_NAME -v $DKMS_VERSION -q --all --rpm_safe_upgrade || :
 %endif
 
 %changelog
+* Thu Jul 23 2026 Flant <aleksandr.stefurishin@flant.com> - 9.2.19~flant.12
+-  Fix stuck resync after reboot during bitmap (metadata) exchange (WF_BITMAP drop-wedge). The flant oos==0 guard in resync_again() (added by 6fe5d9dd9) dropped a postponed WF_BITMAP_S/T re-entry required for data-generation (UUID) reconciliation after a re-handshake, even though that re-entry is needed with a clean bitmap. The sync target then waited forever in L_WF_BITMAP_T while the source stayed L_ESTABLISHED (recoverable only by drbdsetup disconnect). The oos==0 skip is now applied only when there is no sync direction (L_ESTABLISHED); a pending WF_BITMAP_S/T re-entry proceeds regardless of oos, re-driving the bitmap handshake. The data-corruption guard from 6fe5d9dd9 (the !drbd_should_do_remote() gate in drbd_resync_finished()) is left intact.
+
 * Thu Jul 23 2026 Flant <aleksandr.stefurishin@flant.com> - 9.2.19~flant.11
 -  Fix multi-source resync conflict deadlock (cancel-on-pause). When a device is resynced from two peers at once, drbd_select_sync_target() keeps one active L_SYNC_TARGET and forces the other to L_PAUSED_SYNC_T; the paused source goes resync-suspended:peer and never delivers replies, so a resync request already sent to it stays ready-to-send forever and, via the conflict rule in drbd_should_defer_to_interval(), permanently blocks the active source's resync write for the same block -> resync freezes at done:X% (~5% of replicas after a node reboot). New drbd_cancel_paused_resync_requests(), called from w_after_state_change() when a peer enters L_PAUSED_SYNC_T, drops that peer's dangling (sent, not-yet-received) resync requests and releases the writes parked behind them.
 
