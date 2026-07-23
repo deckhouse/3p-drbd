@@ -8832,6 +8832,23 @@ static int receive_state(struct drbd_connection *connection, struct packet_info 
 		resource->state_change_flags |= CS_HARD;
 
 	rv = end_state_change(resource, &irq_flags, "peer-state");
+
+	/* flant.14: A peer-state update may ask us to (re-)enter L_WF_BITMAP_S/T
+	 * while a resync from another peer is still active; end_state_change()
+	 * then returns SS_RESYNC_RUNNING. That is not fatal — postpone the
+	 * (re-)entry via resync_again (exactly as the receive_bitmap path does for
+	 * the same status) and keep the connection. Tearing the connection down
+	 * here (goto fail) during post-reboot multi-source recovery collapses every
+	 * replica to Outdated and loses quorum permanently. stress/results/run-14
+	 * ROOT-CAUSE. new_repl_state still holds the intended (rejected) state at
+	 * this point; it is overwritten with the current state just below. */
+	if (rv == SS_RESYNC_RUNNING &&
+	    (new_repl_state == L_WF_BITMAP_S || new_repl_state == L_WF_BITMAP_T)) {
+		peer_device->resync_again++;
+		drbd_info(peer_device, "Resync already active, postponing bitmap-exchange re-entry until it finishes\n");
+		rv = SS_SUCCESS;
+	}
+
 	new_repl_state = peer_device->repl_state[NOW];
 
 	if (rv < SS_SUCCESS)

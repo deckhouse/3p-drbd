@@ -2,6 +2,11 @@ Latest:
 ------
  For even more detail, use "git log" or visit https://github.com/LINBIT/drbd/commits/master.
 
+9.2.19-flant.14 (api:genl2/proto:86-101,118-124/transport:21)
+--------
+ * Fix permanent quorum loss after a Primary-node reboot. During post-reboot multi-source recovery a peer-state update can ask a node that is already L_SYNC_TARGET (syncing from one peer) to re-enter L_WF_BITMAP_T for another peer; end_state_change() returns SS_RESYNC_RUNNING (-8) and receive_state() treated that as fatal (goto fail -> C_DISCONNECTING). Dropping the connection mid-recovery tears down the last good replica relationships, so every replica settles Outdated/Inconsistent with no UpToDate copy and quorum-minimum-redundancy can never be satisfied -> the resource is stuck forever (writer stuck attaching; ~1% of a rebooted Primary's resources). receive_state() now treats SS_RESYNC_RUNNING on an L_WF_BITMAP_S/T (re-)entry the same way the receive_bitmap path already does: postpone via resync_again and keep the connection, so the active resync finishes and the postponed one is re-driven. The failing path is stock LINBIT code (not flant-introduced). Companion to the flant.12 oos change and flant.13 re-drive. See stress/results/run-14.
+
+
 9.2.19-flant.13 (api:genl2/proto:86-101,118-124/transport:21)
 --------
  * Fix stuck resync after reboot: the paused source of a multi-source resync is not resumed. When a node finishes resyncing and becomes UpToDate, __cancel_other_resyncs() cancels the other (PausedSyncT/WFBitMapT) resyncs to L_ESTABLISHED but never re-drives them; resync_again() ignores peers whose resync_again counter is 0, and drbd_select_sync_target() only re-selects peers already in a sync-target state — so a peer that is itself still behind (Outdated/Inconsistent) is left L_ESTABLISHED with a dirty bitmap and never resyncs (~10% of a rebooted node's peers). __cancel_other_resyncs() now re-drives such a still-behind peer in the SOURCE direction (resync_again++ + source mask) so this now-UpToDate node resyncs it. Companion to the flant.12 oos change. See stress/results/run-13.

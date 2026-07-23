@@ -1,6 +1,6 @@
 Name: drbd-kernel
 Summary: Kernel driver for DRBD
-Version: 9.2.19~flant.13
+Version: 9.2.19~flant.14
 Release: 1
 
 # always require a suitable userland
@@ -232,6 +232,8 @@ dkms remove -m $DKMS_NAME -v $DKMS_VERSION -q --all --rpm_safe_upgrade || :
 %endif
 
 %changelog
+* Wed Jul 15 2026 Flant <aleksandr.stefurishin@flant.com> - 9.2.19~flant.14
+-  Fix permanent quorum loss after a Primary-node reboot (all replicas end Outdated/Inconsistent, no UpToDate copy, resource stuck forever). During post-reboot multi-source recovery a peer-state update can ask a node already in L_SYNC_TARGET to re-enter L_WF_BITMAP_T; end_state_change() returns SS_RESYNC_RUNNING and receive_state() treated it as fatal (goto fail -> connection disconnect), which tears down the last good replica relationships and collapses every copy to Outdated so quorum-minimum-redundancy can never be met (~1% of a rebooted Primary's resources; stress/results/run-14). receive_state() now postpones the WF_BITMAP_S/T re-entry (resync_again++) and keeps the connection, mirroring the existing receive_bitmap SS_RESYNC_RUNNING handler. Stock LINBIT path (not flant-introduced); companion to flant.12/flant.13.
 * Thu Jul 23 2026 Flant <aleksandr.stefurishin@flant.com> - 9.2.19~flant.13
 -  Fix stuck resync after reboot: paused source of a multi-source resync is not resumed. When a node finishes resyncing and becomes UpToDate, __cancel_other_resyncs() cancels the other (PausedSyncT/WFBitMapT) resyncs to L_ESTABLISHED but never re-drives them; resync_again() ignores peers whose resync_again counter is 0, and drbd_select_sync_target() only re-selects peers already in a sync-target state — so a peer that is itself still behind (Outdated/Inconsistent) is left L_ESTABLISHED with a dirty bitmap and never resyncs (~10% of a rebooted node's peers; stress/results/run-13). Now __cancel_other_resyncs() re-drives such a still-behind peer in the SOURCE direction (resync_again++ + source mask) so this now-UpToDate node resyncs it. Companion to the flant.12 oos change.
 
