@@ -1657,7 +1657,7 @@ static bool was_resync_stable(struct drbd_peer_device *peer_device)
 	return true;
 }
 
-static u64 __cancel_other_resyncs(struct drbd_device *device)
+static u64 __cancel_other_resyncs(struct drbd_device *device, u64 *resume_source_m)
 {
 	struct drbd_peer_device *peer_device;
 	u64 target_m = 0;
@@ -1669,6 +1669,25 @@ static u64 __cancel_other_resyncs(struct drbd_device *device)
 		    peer_device->repl_state[NEW] == L_WF_BITMAP_T) {
 			target_m |= NODE_MASK(peer_device->node_id);
 			__change_repl_state(peer_device, L_ESTABLISHED);
+
+			/* flant.13: if the cancelled peer is itself still behind (its
+			 * disk is Inconsistent/Outdated/Consistent), this node — which
+			 * just became UpToDate — must now resync it as SOURCE. Otherwise
+			 * the peer is left L_ESTABLISHED + Outdated with a dirty bitmap
+			 * and no resync is ever (re)started: drbd_select_sync_target()
+			 * only re-selects peers already in a sync-target repl state, and
+			 * resync_again() ignores peers whose resync_again counter is 0
+			 * (which __change_repl_state above does not set). Re-drive it in
+			 * the SOURCE direction via resync_again(); combined with the
+			 * flant.12 oos change the WF_BITMAP_S re-entry proceeds even when
+			 * the bitmap momentarily reads clean during the generation
+			 * reconcile. stress/results/run-13 ROOT-CAUSE. */
+			if (resume_source_m &&
+			    peer_device->disk_state[NEW] >= D_INCONSISTENT &&
+			    peer_device->disk_state[NEW] < D_UP_TO_DATE) {
+				*resume_source_m |= NODE_MASK(peer_device->node_id);
+				peer_device->resync_again++;
+			}
 		}
 	}
 
@@ -1968,7 +1987,7 @@ void drbd_resync_finished(struct drbd_peer_device *peer_device,
 			}
 
 			if (device->disk_state[NEW] == D_UP_TO_DATE)
-				target_m = __cancel_other_resyncs(device);
+				target_m = __cancel_other_resyncs(device, &source_m);
 
 			if (!unstable_source && stable_resync &&
 			    test_bit(UUIDS_RECEIVED, &peer_device->flags)) {

@@ -1,6 +1,6 @@
 Name: drbd-kernel
 Summary: Kernel driver for DRBD
-Version: 9.2.19~flant.12
+Version: 9.2.19~flant.13
 Release: 1
 
 # always require a suitable userland
@@ -232,6 +232,9 @@ dkms remove -m $DKMS_NAME -v $DKMS_VERSION -q --all --rpm_safe_upgrade || :
 %endif
 
 %changelog
+* Thu Jul 23 2026 Flant <aleksandr.stefurishin@flant.com> - 9.2.19~flant.13
+-  Fix stuck resync after reboot: paused source of a multi-source resync is not resumed. When a node finishes resyncing and becomes UpToDate, __cancel_other_resyncs() cancels the other (PausedSyncT/WFBitMapT) resyncs to L_ESTABLISHED but never re-drives them; resync_again() ignores peers whose resync_again counter is 0, and drbd_select_sync_target() only re-selects peers already in a sync-target state — so a peer that is itself still behind (Outdated/Inconsistent) is left L_ESTABLISHED with a dirty bitmap and never resyncs (~10% of a rebooted node's peers; stress/results/run-13). Now __cancel_other_resyncs() re-drives such a still-behind peer in the SOURCE direction (resync_again++ + source mask) so this now-UpToDate node resyncs it. Companion to the flant.12 oos change.
+
 * Thu Jul 23 2026 Flant <aleksandr.stefurishin@flant.com> - 9.2.19~flant.12
 -  Fix stuck resync after reboot during bitmap (metadata) exchange (WF_BITMAP drop-wedge). The flant oos==0 guard in resync_again() (added by 6fe5d9dd9) dropped a postponed WF_BITMAP_S/T re-entry required for data-generation (UUID) reconciliation after a re-handshake, even though that re-entry is needed with a clean bitmap. The sync target then waited forever in L_WF_BITMAP_T while the source stayed L_ESTABLISHED (recoverable only by drbdsetup disconnect). The oos==0 skip is now applied only when there is no sync direction (L_ESTABLISHED); a pending WF_BITMAP_S/T re-entry proceeds regardless of oos, re-driving the bitmap handshake. The data-corruption guard from 6fe5d9dd9 (the !drbd_should_do_remote() gate in drbd_resync_finished()) is left intact.
 

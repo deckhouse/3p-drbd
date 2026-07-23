@@ -1,3 +1,9 @@
+drbd (9.2.19~flant.13-1) unstable; urgency=medium
+
+  * Fix stuck resync after reboot: the paused source of a multi-source resync is not resumed. When a node becomes UpToDate, __cancel_other_resyncs() cancels the other paused resyncs to L_ESTABLISHED without re-driving them, so a peer that is itself still behind (Outdated/Inconsistent) is left Established with a dirty bitmap and never resyncs. __cancel_other_resyncs() now re-drives such a still-behind peer as SOURCE (resync_again++ + source mask). Companion to the flant.12 oos change. See stress/results/run-13.
+
+ -- Flant <aleksandr.stefurishin@flant.com>  Thu, 23 Jul 2026 12:43:00 +0300
+
 drbd (9.2.19~flant.12-1) unstable; urgency=medium
 
   * Fix stuck resync after reboot during bitmap (metadata) exchange: the flant oos==0 guard in resync_again() (6fe5d9dd9) dropped a postponed WF_BITMAP_S/T re-entry needed for data-generation (UUID) reconciliation after a re-handshake, so the sync target waited forever in L_WF_BITMAP_T while the source stayed L_ESTABLISHED. The oos==0 skip now applies only when there is no sync direction (L_ESTABLISHED); a pending WF_BITMAP re-entry proceeds regardless of oos. The corruption guard from 6fe5d9dd9 in drbd_resync_finished() is unchanged.
