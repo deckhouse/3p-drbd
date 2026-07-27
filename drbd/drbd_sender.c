@@ -1685,25 +1685,38 @@ static void resync_again(struct drbd_device *device, u64 source_m, u64 target_m)
 			u64 m = NODE_MASK(peer_device->node_id);
 			enum drbd_repl_state new_repl_state;
 
-			/* OOS bits may have cleared by the time we get here
-			 * (late acks from in-flight writes). Skip if bitmap
-			 * is already clean — nothing to resync. */
-			if (oos == 0) {
-				peer_device->resync_again = 0;
-				continue;
-			}
-
 			new_repl_state =
 				source_m & m ? L_WF_BITMAP_S :
 				target_m & m ? L_WF_BITMAP_T :
 				L_ESTABLISHED;
 
-			if (new_repl_state != L_ESTABLISHED) {
-				peer_device->resync_again--;
-				begin_state_change_locked(device->resource, CS_VERBOSE);
-				__change_repl_state(peer_device, new_repl_state);
-				end_state_change_locked(device->resource, "resync-again");
+			/* A postponed WF_BITMAP_S/T re-entry is a data-generation
+			 * (UUID) reconcile after a re-handshake — e.g. a diskless
+			 * primary rotating its current UUID re-enters WF_BITMAP_S while
+			 * a resync is already running, so the re-entry is postponed
+			 * (resync_again++). It MUST proceed even when the out-of-sync
+			 * bitmap is already clean (oos == 0): the bitmap weight does not
+			 * represent the new data generation. Dropping it on oos == 0
+			 * leaves the sync target waiting forever in L_WF_BITMAP_T while
+			 * the source stays L_ESTABLISHED (stuck resync after reboot).
+			 *
+			 * The oos == 0 skip is therefore applied ONLY when there is no
+			 * sync direction (L_ESTABLISHED): there a clean bitmap means the
+			 * OOS bits cleared meanwhile (late acks from in-flight writes)
+			 * and there is genuinely nothing to resync. The corruption guard
+			 * from commit 6fe5d9dd9 (the !drbd_should_do_remote() gate in
+			 * drbd_resync_finished() that decides whether to postpone at all)
+			 * is unchanged. */
+			if (new_repl_state == L_ESTABLISHED) {
+				if (oos == 0)
+					peer_device->resync_again = 0;
+				continue;
 			}
+
+			peer_device->resync_again--;
+			begin_state_change_locked(device->resource, CS_VERBOSE);
+			__change_repl_state(peer_device, new_repl_state);
+			end_state_change_locked(device->resource, "resync-again");
 		}
 	}
 }
