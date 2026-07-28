@@ -835,7 +835,10 @@ static enum drbd_state_rv ___end_state_change(struct drbd_resource *resource, st
 	if (rv >= SS_SUCCESS)
 		rv = try_state_change(resource);
 	if (rv < SS_SUCCESS) {
-		if (flags & CS_VERBOSE) {
+		/* SS_ALREADY_STANDALONE is an idempotent no-op (see
+		 * conn_try_disconnect / teardown); do not spam kern.log.
+		 */
+		if ((flags & CS_VERBOSE) && rv != SS_ALREADY_STANDALONE) {
 			drbd_err(resource, "State change failed: %s (%d)\n",
 					drbd_set_st_err_str(rv), rv);
 			print_state_change(resource, "Failed: ", tag);
