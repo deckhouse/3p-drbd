@@ -665,6 +665,11 @@ enum peer_device_flag {
 				 * send it our current UUID (the relabel), ordered
 				 * by the sender after the replayed transfer log.
 				 */
+	TRACK_WRITES_IN_BITMAP,	/* Record incoming writes in this peer's bitmap
+				 * without replicating them, so a snapshot taken
+				 * on another replica can be brought up to date
+				 * later. Armed by DRBD_ADM_TRACK_BITMAP.
+				 */
 };
 
 /* We could make these currently hardcoded constants configurable
@@ -898,6 +903,12 @@ enum which_state { NOW, OLD = NOW, NEW };
 enum twopc_type {
 	TWOPC_STATE_CHANGE,
 	TWOPC_RESIZE,
+	/* Cluster-wide acquisition or release of resource->admin_lock.
+	 * The lock vs unlock distinction is encoded in the twopc_request
+	 * flags (TWOPC_ADMIN_LOCK_OP_LOCK / TWOPC_ADMIN_LOCK_OP_UNLOCK).
+	 * No type-specific reply payload: peers reply SS_SUCCESS or
+	 * SS_RESOURCE_LOCKED via the common return-code path. */
+	TWOPC_ADMIN_LOCK,
 };
 
 struct twopc_reply {
@@ -1055,6 +1066,11 @@ struct drbd_resource {
 				u64 primary_nodes;	/* added in commit phase */
 				u64 reachable_nodes;	/* added in commit phase */
 			} state_change;
+			struct twopc_admin_lock {
+				bool is_lock;		/* true=acquire, false=release */
+				int holder_node_id;	/* from prepare phase */
+				u32 generation_tid;	/* from prepare phase, == twopc tid */
+			} admin_lock;
 		};
 	} twopc;
 	enum drbd_role role[2];
@@ -1065,6 +1081,36 @@ struct drbd_resource {
 	bool fail_io[2];		/* Fail all IO requests because forced a demote */
 	bool cached_susp;		/* cached result of looking at all different suspend bits */
 	bool cached_all_devices_have_quorum;
+
+	/* Cluster-wide administrative lock state.
+	 *
+	 * Acquired and released atomically across all peers via
+	 * TWOPC_ADMIN_LOCK. While held=true, all admin handlers outside
+	 * the IO-orchestration whitelist are rejected with -EBUSY. There
+	 * is no kernel-level timeout: lifecycle is owned by the userspace
+	 * caller (k8s controller). The fields are protected by
+	 * state_rwlock on writes and by READ_ONCE() on the drbd_nl gate
+	 * read-path.
+	 *
+	 * holder_node_id is the resource->res_opts.node_id of the node
+	 * that initiated the successful lock twopc; matched against
+	 * lock_expected_holder_node_id in DRBD_ADM_UNLOCK.
+	 *
+	 * generation_tid is the twopc transaction id of the acquisition;
+	 * matched against lock_expected_generation in DRBD_ADM_UNLOCK.
+	 * Bumps every successful lock; never reused.
+	 *
+	 * seq is a monotonically increasing per-resource counter that
+	 * bumps on every successful TWOPC_ADMIN_LOCK commit (both lock
+	 * and unlock). It is the sole source of truth for "which view
+	 * is more recent" during state-handshake on reconnect, because
+	 * generation_tid is a random u32 and carries no chronology. */
+	struct {
+		bool held;
+		int holder_node_id;
+		u32 generation_tid;
+		u64 seq;
+	} admin_lock;
 
 	enum write_ordering_e write_ordering;
 
@@ -1587,6 +1633,8 @@ struct drbd_device {
 
 	struct kref kref;
 	struct kref_debug_info kref_debug;
+
+	unsigned long track_bitmap_slots;
 
 	/* things that are stored as / read from meta data on disk */
 	unsigned long flags;
@@ -2469,6 +2517,73 @@ struct drbd_connection *drbd_get_connection_by_node_id(struct drbd_resource *res
 						       int node_id);
 bool drbd_have_local_disk(struct drbd_resource *resource);
 enum drbd_state_rv drbd_support_2pc_resize(struct drbd_resource *resource);
+/* Returns SS_SUCCESS if all currently connected peers advertise
+ * DRBD_FF_ADMIN_LOCK, SS_NOT_SUPPORTED otherwise. Lives in
+ * drbd_admin_lock.c (created in the kernel_admin_lock_c step). */
+enum drbd_state_rv drbd_support_admin_lock(struct drbd_resource *resource);
+/* Cluster-wide acquire (is_lock=true) or release (is_lock=false) of
+ * resource->admin_lock via TWOPC_ADMIN_LOCK. Returns SS_SUCCESS on
+ * commit, SS_RESOURCE_LOCKED if a peer rejected the prepare (caller
+ * is expected to retry with backoff after pre-checks), or other
+ * SS_* codes for transport / handshake errors. Implemented in
+ * drbd_state.c next to change_cluster_wide_device_size. */
+enum drbd_state_rv change_cluster_wide_admin_lock(struct drbd_resource *resource,
+						  bool is_lock,
+						  int holder_node_id);
+/* Peer-side prepare-phase validation for an incoming TWOPC_ADMIN_LOCK.
+ * Returns SS_SUCCESS if this peer is willing to participate, or a
+ * negative SS_* code otherwise (e.g. SS_RESOURCE_LOCKED if the peer
+ * already holds an admin_lock with a different generation, or if any
+ * local peer_device->repl_state is not Established for an acquire).
+ * Implemented in drbd_admin_lock.c (kernel_admin_lock_c step). */
+enum drbd_state_rv drbd_admin_lock_twopc_prepare_peer(struct drbd_resource *resource,
+						      struct twopc_admin_lock *al);
+/* Peer-side commit-phase application of a TWOPC_ADMIN_LOCK transaction.
+ * Writes resource->admin_lock from the staged twopc.admin_lock state
+ * under state_rwlock and bumps admin_lock.seq. Implemented in
+ * drbd_admin_lock.c. */
+void drbd_admin_lock_twopc_commit_peer(struct drbd_resource *resource,
+				       struct twopc_admin_lock *al);
+/* Send the local admin_lock view to a peer; called during state-handshake
+ * once DRBD_FF_ADMIN_LOCK is in agreed_features. Implemented in
+ * drbd_admin_lock.c. */
+int drbd_send_admin_lock_state(struct drbd_connection *connection);
+/* Merge an incoming admin_lock view from a peer with the local one.
+ * Side with the larger seq wins; on equal seq the views must coincide
+ * (otherwise a warning is logged and the local view is kept). Called
+ * from receive_admin_lock_state in drbd_receiver.c; implemented in
+ * drbd_admin_lock.c. */
+void drbd_admin_lock_apply_peer_view(struct drbd_resource *resource,
+				     bool peer_held,
+				     int peer_holder_node_id,
+				     u32 peer_generation_tid,
+				     u64 peer_seq);
+/* Returns true iff resource->admin_lock.held is set and `cmd` is not in
+ * the IO-orchestration whitelist (suspend-io, resume-io, track-bitmap,
+ * flush-bitmap, new-current-uuid, lock, unlock, force-unlock).
+ *
+ * Called from drbd_adm_prepare(); cmd is the genlmsghdr->cmd value
+ * (one of the DRBD_ADM_* constants). The check is performed under
+ * READ_ONCE() because no admin context can be entered concurrently
+ * with TWOPC_ADMIN_LOCK commit (state_rwlock orders them).
+ *
+ * Read-only dump commands (.dumpit) never reach drbd_adm_prepare and
+ * therefore do not need to be on the whitelist. Implemented in
+ * drbd_admin_lock.c. */
+bool drbd_admin_lock_blocks(struct drbd_resource *resource, u8 cmd);
+/* Block (interruptible) until every directly-connected peer_device on
+ * `resource` has repl_state == L_ESTABLISHED, bounded by
+ * res_opts.admin_lock_wait_timeout seconds. Returns SS_SUCCESS on
+ * drain, SS_TIMEOUT on timeout, SS_UNKNOWN_ERROR on signal. Must be
+ * called with resource->adm_mutex held by the caller. Implemented in
+ * drbd_admin_lock.c. */
+enum drbd_state_rv drbd_admin_lock_wait_for_local_drain(struct drbd_resource *resource);
+/* Push the local admin_lock view to every connected peer that
+ * advertises DRBD_FF_ADMIN_LOCK. Used by drbd_adm_force_unlock to
+ * propagate a unilateral release without going through twopc.
+ * Best-effort: per-peer send errors are logged but not surfaced.
+ * Implemented in drbd_admin_lock.c. */
+void drbd_admin_lock_broadcast_state(struct drbd_resource *resource);
 enum determine_dev_size
 drbd_commit_size_change(struct drbd_device *device, struct resize_parms *rs,
 			u64 nodes_to_reach);

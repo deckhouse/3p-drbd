@@ -96,6 +96,7 @@ drbd-y += drbd_interval.o
 drbd-y += drbd_state.o
 drbd-y += drbd_nla.o
 drbd-y += drbd_transport.o
+drbd-y += drbd_admin_lock.o
 drbd-y += $(compat_objs)
 
 drbd-$(CONFIG_DRBD_DAX)   += drbd_dax_pmem.o

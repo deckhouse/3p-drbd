@@ -4753,7 +4753,8 @@ __cluster_wide_request(struct drbd_resource *resource, struct twopc_request *req
 			wake_up(&resource->work.q_wait);
 			continue;
 		}
-		if (cmd == P_TWOPC_PREPARE || cmd == P_TWOPC_PREP_RSZ)
+		if (cmd == P_TWOPC_PREPARE || cmd == P_TWOPC_PREP_RSZ ||
+		    cmd == P_TWOPC_PREP_LOCK)
 			drbd_queue_ping(connection);
 		rv = SS_CW_SUCCESS;
 	}
@@ -5619,6 +5620,160 @@ retry:
 	return dd;
 }
 
+/**
+ * change_cluster_wide_admin_lock - Cluster-wide acquire/release of admin_lock
+ * @resource: resource to lock
+ * @is_lock: true to acquire, false to release
+ * @holder_node_id: identity stored in admin_lock.holder_node_id on commit;
+ *                  must equal resource->res_opts.node_id (we are coordinator)
+ *
+ * Modeled after change_cluster_wide_device_size: we run our own retry loop
+ * around __cluster_wide_request / twopc_phase2 instead of going through
+ * change_cluster_wide_state, because admin_lock has no drbd_state mask/val.
+ *
+ * Caller MUST hold resource->adm_mutex. The caller is expected to have
+ * already drained any local background resync (so that local PH_PREPARE
+ * predicates pass immediately); peers reply YES/NO without waiting.
+ *
+ * Returns SS_SUCCESS on commit, SS_TIMEOUT after exhausting retries on
+ * persistent SS_TIMEOUT/SS_CONCURRENT_ST_CHG, SS_NOT_SUPPORTED if any
+ * peer lacks DRBD_FF_ADMIN_LOCK, SS_RESOURCE_LOCKED if a peer denied
+ * the prepare (e.g. because its repl_state is not Established).
+ */
+enum drbd_state_rv
+change_cluster_wide_admin_lock(struct drbd_resource *resource,
+			       bool is_lock,
+			       int holder_node_id)
+{
+	struct twopc_reply *reply = &resource->twopc_reply;
+	struct twopc_request request;
+	unsigned long start_time;
+	unsigned long irq_flags;
+	enum drbd_state_rv rv;
+	u64 reach_immediately;
+	bool have_peers, commit_it;
+	int retries = 1;
+
+retry:
+	rv = drbd_support_admin_lock(resource);
+	if (rv < SS_SUCCESS)
+		return rv;
+
+	state_change_lock(resource, &irq_flags, CS_VERBOSE | CS_LOCAL_ONLY);
+	rcu_read_lock();
+	complete_remote_state_change(resource, &irq_flags);
+	start_time = jiffies;
+	reach_immediately = directly_connected_nodes(resource, NOW);
+
+	*reply = (struct twopc_reply) { 0 };
+
+	do
+		reply->tid = get_random_u32();
+	while (!reply->tid);
+
+	request.tid = reply->tid;
+	request.initiator_node_id = resource->res_opts.node_id;
+	request.target_node_id = -1;
+	request.nodes_to_reach = ~(reach_immediately | NODE_MASK(resource->res_opts.node_id));
+	request.vnr = -1;
+	request.cmd = P_TWOPC_PREP_LOCK;
+	request.flags = is_lock ? TWOPC_ADMIN_LOCK_OP_LOCK : TWOPC_ADMIN_LOCK_OP_UNLOCK;
+
+	resource->twopc.type = TWOPC_ADMIN_LOCK;
+	resource->twopc.admin_lock.is_lock = is_lock;
+	resource->twopc.admin_lock.holder_node_id = holder_node_id;
+	/* For acquire: a new lock instance gets a fresh generation (we
+	 * reuse the 2pc tid for convenience). For release: the lock instance
+	 * already has a generation (resource->admin_lock.generation_tid);
+	 * we MUST replay it so the peer-side prepare validator matches.
+	 * Using a fresh tid here would make the peer reject the unlock as
+	 * a cross-holder release (SS_CW_FAILED_BY_PEER). */
+	resource->twopc.admin_lock.generation_tid =
+		is_lock ? reply->tid : resource->admin_lock.generation_tid;
+	resource->twopc_parent_nodes = 0;
+	resource->remote_state_change = true;
+
+	reply->initiator_node_id = resource->res_opts.node_id;
+	reply->target_node_id = -1;
+	reply->reachable_nodes = reach_immediately | NODE_MASK(resource->res_opts.node_id);
+	reply->target_reachable_nodes = reply->reachable_nodes;
+	rcu_read_unlock();
+	state_change_unlock(resource, &irq_flags);
+
+	drbd_info(resource, "Preparing cluster-wide admin %s %u (holder=%d)\n",
+		  is_lock ? "lock" : "unlock", request.tid, holder_node_id);
+
+	rv = __cluster_wide_request(resource, &request, reach_immediately);
+
+	have_peers = rv == SS_CW_SUCCESS;
+	if (have_peers) {
+		if (wait_event_timeout(resource->state_wait,
+				       cluster_wide_reply_ready(resource),
+				       twopc_timeout(resource)))
+			rv = get_cluster_wide_reply(resource, NULL);
+		else
+			rv = SS_TIMEOUT;
+
+		if (rv == SS_TIMEOUT || rv == SS_CONCURRENT_ST_CHG) {
+			long timeout = twopc_retry_timeout(resource, retries++);
+
+			drbd_info(resource, "Retrying cluster-wide admin %s after %ums\n",
+				  is_lock ? "lock" : "unlock",
+				  jiffies_to_msecs(timeout));
+
+			request.cmd = P_TWOPC_ABORT;
+			twopc_phase2(resource, &request, reach_immediately);
+			clear_remote_state_change(resource);
+			schedule_timeout_interruptible(timeout);
+			goto retry;
+		}
+	}
+
+	commit_it = (rv >= SS_SUCCESS);
+	request.cmd = commit_it ? P_TWOPC_COMMIT : P_TWOPC_ABORT;
+	if (have_peers)
+		twopc_phase2(resource, &request, reach_immediately);
+
+	if (commit_it) {
+		write_lock_irq(&resource->state_rwlock);
+		if (is_lock) {
+			resource->admin_lock.held = true;
+			resource->admin_lock.holder_node_id = holder_node_id;
+			resource->admin_lock.generation_tid = reply->tid;
+		} else {
+			resource->admin_lock.held = false;
+			resource->admin_lock.holder_node_id = -1;
+			resource->admin_lock.generation_tid = 0;
+		}
+		/* Bump seq in lockstep with peers (drbd_admin_lock_twopc_commit_peer
+		 * bumps too). Without this the coordinator's local seq lags behind
+		 * peers, and the next P_ADMIN_LOCK_STATE merge in
+		 * drbd_admin_lock_apply_peer_view sees peer_seq > local_seq and
+		 * silently *adopts* whatever the peer reports - typically clobbering
+		 * the just-committed lock back to held=false. */
+		resource->admin_lock.seq++;
+		write_unlock_irq(&resource->state_rwlock);
+
+		drbd_info(resource, "Committed cluster-wide admin %s %u (%ums)\n",
+			  is_lock ? "lock" : "unlock", request.tid,
+			  jiffies_to_msecs(jiffies - start_time));
+
+		/* Normalize rv: get_cluster_wide_reply returns SS_CW_SUCCESS on
+		 * peer agreement, which our public contract (and drbd_adm_lock /
+		 * drbd_adm_unlock switch) treats as an unrecognized status
+		 * (default -> ERR_INVALID_REQUEST). Userspace should see plain
+		 * success on commit. */
+		rv = SS_SUCCESS;
+	} else {
+		drbd_info(resource, "Aborted cluster-wide admin %s %u (%ums) rv=%d\n",
+			  is_lock ? "lock" : "unlock", request.tid,
+			  jiffies_to_msecs(jiffies - start_time), rv);
+	}
+
+	clear_remote_state_change(resource);
+	return rv;
+}
+
 static void twopc_end_nested(struct drbd_resource *resource, enum drbd_packet cmd)
 {
 	struct drbd_connection *twopc_parent;
@@ -5715,7 +5870,8 @@ nested_twopc_request(struct drbd_resource *resource, struct twopc_request *reque
 
 	rv = __cluster_wide_request(resource, request, reach_immediately);
 	have_peers = rv == SS_CW_SUCCESS;
-	if (cmd == P_TWOPC_PREPARE || cmd == P_TWOPC_PREP_RSZ) {
+	if (cmd == P_TWOPC_PREPARE || cmd == P_TWOPC_PREP_RSZ ||
+	    cmd == P_TWOPC_PREP_LOCK) {
 		if (rv < SS_SUCCESS)
 			twopc_end_nested(resource, P_TWOPC_NO);
 		else if (!have_peers && cluster_wide_reply_ready(resource)) /* no nested nodes */
