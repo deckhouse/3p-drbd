@@ -1799,6 +1799,15 @@ int conn_send_twopc_request(struct drbd_connection *connection, struct twopc_req
 				cpu_to_be64(resource->twopc.resize.diskful_primary_nodes);
 			p->exposed_size = cpu_to_be64(resource->twopc.resize.new_size);
 		}
+		break;
+	case TWOPC_ADMIN_LOCK:
+		/* For PREP_LOCK / COMMIT / ABORT all carry the generation so the
+		 * peer-side prepare validator can match it against its stored
+		 * generation (otherwise unlock with a fresh transaction tid would
+		 * be rejected as cross-holder release). */
+		p->admin_lock_generation =
+			cpu_to_be32(resource->twopc.admin_lock.generation_tid);
+		break;
 	}
 	return send_command(connection, request->vnr, request->cmd, DATA_STREAM | SFLAG_FLUSH);
 }
@@ -3819,6 +3828,11 @@ struct drbd_resource *drbd_create_resource(const char *name,
 	resource->role[NOW] = R_SECONDARY;
 	resource->max_node_id = res_opts->drbd8_compat_mode ? 1 : res_opts->node_id;
 	resource->twopc_reply.initiator_node_id = -1;
+	/* admin_lock starts released. holder_node_id needs an explicit -1
+	 * (kzalloc gives 0, which is a valid node id and would falsely
+	 * advertise node 0 as the holder in res_opts dumps). All other
+	 * fields are correctly zero from kzalloc. */
+	resource->admin_lock.holder_node_id = -1;
 	mutex_init(&resource->conf_update);
 	mutex_init(&resource->adm_mutex);
 	mutex_init(&resource->open_release);

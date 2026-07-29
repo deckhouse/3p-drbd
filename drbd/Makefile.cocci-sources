@@ -30,6 +30,7 @@ sources-ignored += drbd_legacy_84.c
 
 sources += drbd_actlog.c
 sources += drbd_bitmap.c
+sources += drbd_admin_lock.c
 sources += drbd_dax_pmem.c
 sources += drbd_debugfs.c
 sources += drbd_interval.c

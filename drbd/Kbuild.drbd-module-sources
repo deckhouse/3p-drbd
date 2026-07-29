@@ -52,6 +52,7 @@ drbd-kernel-compat/nsecs_to_jiffies.c
 drbd-kernel-compat/uapi/linux/handshake.h
 drbd-kernel-compat/uapi/linux/sched/types.h
 drbd_actlog.c
+drbd_admin_lock.c
 drbd_bitmap.c
 drbd_dax_pmem.c
 drbd_dax_pmem.h

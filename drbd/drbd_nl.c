@@ -70,6 +70,11 @@ static int drbd_adm_resource_opts(struct sk_buff *skb, struct genl_info *info);
 static int drbd_adm_get_timeout_type(struct sk_buff *skb, struct genl_info *info);
 static int drbd_adm_forget_peer(struct sk_buff *skb, struct genl_info *info);
 static int drbd_adm_rename_resource(struct sk_buff *skb, struct genl_info *info);
+static int drbd_adm_track_bitmap(struct sk_buff *skb, struct genl_info *info);
+static int drbd_adm_flush_bitmap(struct sk_buff *skb, struct genl_info *info);
+static int drbd_adm_lock(struct sk_buff *skb, struct genl_info *info);
+static int drbd_adm_unlock(struct sk_buff *skb, struct genl_info *info);
+static int drbd_adm_force_unlock(struct sk_buff *skb, struct genl_info *info);
 /* .dumpit */
 static int drbd_adm_dump_resources(struct sk_buff *skb, struct netlink_callback *cb);
 static int drbd_adm_dump_devices(struct sk_buff *skb, struct netlink_callback *cb);
@@ -361,6 +366,25 @@ static int drbd_adm_prepare(struct drbd_config_context *adm_ctx,
 			kref_debug_get(&adm_ctx->device->kref_debug, 4);
 		}
 		rcu_read_unlock();
+	}
+
+	/* admin_lock gate: if the resource carries a held cluster-wide
+	 * admin_lock, reject any command that is not on the IO-orchestration
+	 * whitelist. We pick the resource via the explicit resource_name
+	 * (NEED_RESOURCE path) or, failing that, via adm_ctx->device->resource
+	 * (NEED_MINOR-only path). Commands with no resource context (e.g.
+	 * NEW_RESOURCE) cannot be locked and are pass-through here. */
+	{
+		struct drbd_resource *gate_res = adm_ctx->resource;
+
+		if (!gate_res && adm_ctx->device)
+			gate_res = adm_ctx->device->resource;
+		if (gate_res && drbd_admin_lock_blocks(gate_res, cmd)) {
+			drbd_msg_put_info(adm_ctx->reply_skb,
+				"resource is locked by admin_lock");
+			err = ERR_LOCK_HELD;
+			goto finish;
+		}
 	}
 
 	/* some more paranoia, if the request was over-determined */
@@ -5923,6 +5947,315 @@ static int drbd_adm_resume_sync(struct sk_buff *skb, struct genl_info *info)
 	return 0;
 }
 
+static int drbd_adm_track_bitmap(struct sk_buff *skb, struct genl_info *info)
+{
+	struct drbd_config_context adm_ctx;
+	struct drbd_peer_device *peer_device;
+	struct drbd_device *device;
+	enum drbd_ret_code retcode;
+	struct track_bitmap_parms parms = {};
+	int err;
+
+	retcode = drbd_adm_prepare(&adm_ctx, skb, info, DRBD_ADM_NEED_PEER_DEVICE);
+	if (!adm_ctx.reply_skb)
+		return retcode;
+
+	peer_device = adm_ctx.peer_device;
+	device = peer_device->device;
+
+	if (mutex_lock_interruptible(&adm_ctx.resource->adm_mutex)) {
+		retcode = ERR_INTR;
+		goto out;
+	}
+
+	if (info->attrs[DRBD_NLA_TRACK_BITMAP_PARMS]) {
+		err = track_bitmap_parms_from_attrs(&parms, info);
+		if (err) {
+			retcode = ERR_MANDATORY_TAG;
+			drbd_msg_put_info(adm_ctx.reply_skb, from_attrs_err_to_txt(err));
+			mutex_unlock(&adm_ctx.resource->adm_mutex);
+			goto out;
+		}
+	}
+
+	if (peer_device->bitmap_index == -1) {
+		retcode = ERR_NO_DISK;
+		mutex_unlock(&adm_ctx.resource->adm_mutex);
+		goto out;
+	}
+
+	if (parms.start) {
+		set_bit(TRACK_WRITES_IN_BITMAP, &peer_device->flags);
+		set_bit(peer_device->bitmap_index, &device->track_bitmap_slots);
+		drbd_info(peer_device, "bitmap tracking started\n");
+	} else {
+		clear_bit(TRACK_WRITES_IN_BITMAP, &peer_device->flags);
+		clear_bit(peer_device->bitmap_index, &device->track_bitmap_slots);
+		if (get_ldev(device)) {
+			drbd_bitmap_io(device, &drbd_bmio_clear_one_peer,
+				       "clear tracked bitmap",
+				       BM_LOCK_BULK | BM_LOCK_SINGLE_SLOT,
+				       peer_device);
+			put_ldev(device);
+		}
+		drbd_info(peer_device, "bitmap tracking stopped, bitmap cleared\n");
+	}
+
+	mutex_unlock(&adm_ctx.resource->adm_mutex);
+out:
+	drbd_adm_finish(&adm_ctx, info, retcode);
+	return 0;
+}
+
+static int drbd_adm_flush_bitmap(struct sk_buff *skb, struct genl_info *info)
+{
+	struct drbd_config_context adm_ctx;
+	struct drbd_device *device;
+	enum drbd_ret_code retcode;
+
+	retcode = drbd_adm_prepare(&adm_ctx, skb, info, DRBD_ADM_NEED_MINOR);
+	if (!adm_ctx.reply_skb)
+		return retcode;
+
+	device = adm_ctx.device;
+
+	if (mutex_lock_interruptible(&adm_ctx.resource->adm_mutex)) {
+		retcode = ERR_INTR;
+		goto out;
+	}
+
+	if (!get_ldev(device)) {
+		retcode = ERR_NO_DISK;
+		mutex_unlock(&adm_ctx.resource->adm_mutex);
+		goto out;
+	}
+
+	drbd_bitmap_io(device, &drbd_bm_write, "flush-bitmap",
+		       BM_LOCK_BULK, NULL);
+	put_ldev(device);
+
+	mutex_unlock(&adm_ctx.resource->adm_mutex);
+out:
+	drbd_adm_finish(&adm_ctx, info, retcode);
+	return 0;
+}
+
+/*
+ * admin_lock netlink handlers.
+ *
+ * The lock is whitelisted in drbd_adm_prepare's gate (see
+ * drbd_admin_lock_blocks), so these three handlers are reachable even
+ * when the lock is already held — that lets us implement idempotent
+ * acquire (returns NO_ERROR if we are already the holder), reject
+ * acquire when somebody else holds it (ERR_LOCK_HELD), and validate
+ * holder/generation on release.
+ *
+ * The actual cluster-wide propagation goes through TWOPC_ADMIN_LOCK in
+ * change_cluster_wide_admin_lock (drbd_state.c). The wait for local
+ * background resync drain happens here, under adm_mutex, in
+ * drbd_admin_lock_wait_for_local_drain (drbd_admin_lock.c) so that the
+ * coordinator presents a stable view to peers in P_TWOPC_PREP_LOCK.
+ */
+static int drbd_adm_lock(struct sk_buff *skb, struct genl_info *info)
+{
+	struct drbd_config_context adm_ctx;
+	struct drbd_resource *resource;
+	enum drbd_state_rv rv;
+	enum drbd_ret_code retcode;
+
+	rv = drbd_adm_prepare(&adm_ctx, skb, info, DRBD_ADM_NEED_RESOURCE);
+	if (!adm_ctx.reply_skb)
+		return rv;
+
+	resource = adm_ctx.resource;
+
+	rv = drbd_support_admin_lock(resource);
+	if (rv < SS_SUCCESS) {
+		retcode = ERR_LOCK_NOT_SUPPORTED;
+		drbd_msg_put_info(adm_ctx.reply_skb,
+			"a peer does not advertise DRBD_FF_ADMIN_LOCK");
+		goto out;
+	}
+
+	if (mutex_lock_interruptible(&resource->adm_mutex)) {
+		retcode = ERR_INTR;
+		goto out;
+	}
+
+	if (test_bit(DOWN_IN_PROGRESS, &resource->flags) ||
+	    test_bit(R_UNREGISTERED, &resource->flags)) {
+		retcode = ERR_INVALID_REQUEST;
+		drbd_msg_put_info(adm_ctx.reply_skb, "resource is being removed");
+		goto out_unlock;
+	}
+
+	/* Idempotency: if we are already the holder, accept silently.
+	 * Allows a restarted k8s controller pod to safely re-issue LOCK
+	 * for an already-acquired admin_lock without the kernel side
+	 * having to track caller identity beyond holder_node_id. */
+	if (resource->admin_lock.held &&
+	    resource->admin_lock.holder_node_id == resource->res_opts.node_id) {
+		retcode = NO_ERROR;
+		goto out_unlock;
+	}
+
+	if (resource->admin_lock.held) {
+		retcode = ERR_LOCK_HELD;
+		drbd_msg_put_info(adm_ctx.reply_skb,
+			"admin_lock is already held by another node");
+		goto out_unlock;
+	}
+
+	rv = drbd_admin_lock_wait_for_local_drain(resource);
+	if (rv != SS_SUCCESS) {
+		retcode = (rv == SS_TIMEOUT) ? ERR_LOCK_BUSY : ERR_INTR;
+		goto out_unlock;
+	}
+
+	rv = change_cluster_wide_admin_lock(resource, true,
+					    resource->res_opts.node_id);
+	switch (rv) {
+	case SS_SUCCESS:
+		retcode = NO_ERROR;
+		break;
+	case SS_CW_FAILED_BY_PEER:
+	case SS_CONCURRENT_ST_CHG:
+		retcode = ERR_LOCK_HELD;
+		break;
+	case SS_NOT_SUPPORTED:
+		retcode = ERR_LOCK_NOT_SUPPORTED;
+		break;
+	case SS_TIMEOUT:
+		retcode = ERR_LOCK_BUSY;
+		break;
+	default:
+		retcode = ERR_INVALID_REQUEST;
+	}
+
+out_unlock:
+	mutex_unlock(&resource->adm_mutex);
+out:
+	drbd_adm_finish(&adm_ctx, info, retcode);
+	return 0;
+}
+
+static int drbd_adm_unlock(struct sk_buff *skb, struct genl_info *info)
+{
+	struct drbd_config_context adm_ctx;
+	struct drbd_resource *resource;
+	struct lock_parms parms;
+	enum drbd_state_rv rv;
+	enum drbd_ret_code retcode;
+	int err;
+
+	rv = drbd_adm_prepare(&adm_ctx, skb, info, DRBD_ADM_NEED_RESOURCE);
+	if (!adm_ctx.reply_skb)
+		return rv;
+
+	resource = adm_ctx.resource;
+
+	memset(&parms, 0, sizeof(parms));
+	parms.lock_expected_holder_node_id = DRBD_LOCK_HOLDER_ANY;
+	parms.lock_expected_generation = 0;
+	if (info->attrs[DRBD_NLA_LOCK_PARMS]) {
+		err = lock_parms_from_attrs(&parms, info);
+		if (err) {
+			retcode = ERR_MANDATORY_TAG;
+			drbd_msg_put_info(adm_ctx.reply_skb, from_attrs_err_to_txt(err));
+			goto out;
+		}
+	}
+
+	if (mutex_lock_interruptible(&resource->adm_mutex)) {
+		retcode = ERR_INTR;
+		goto out;
+	}
+
+	if (!resource->admin_lock.held) {
+		retcode = ERR_LOCK_NOT_HELD;
+		goto out_unlock;
+	}
+
+	if (parms.lock_expected_holder_node_id != DRBD_LOCK_HOLDER_ANY &&
+	    parms.lock_expected_holder_node_id != resource->admin_lock.holder_node_id) {
+		retcode = ERR_NOT_LOCK_HOLDER;
+		drbd_msg_put_info(adm_ctx.reply_skb,
+			"unlock: holder_node_id mismatch");
+		goto out_unlock;
+	}
+	if (parms.lock_expected_generation != 0 &&
+	    parms.lock_expected_generation != resource->admin_lock.generation_tid) {
+		retcode = ERR_NOT_LOCK_HOLDER;
+		drbd_msg_put_info(adm_ctx.reply_skb,
+			"unlock: generation mismatch");
+		goto out_unlock;
+	}
+
+	rv = change_cluster_wide_admin_lock(resource, false,
+					    resource->admin_lock.holder_node_id);
+	switch (rv) {
+	case SS_SUCCESS:
+		retcode = NO_ERROR;
+		break;
+	case SS_TIMEOUT:
+		retcode = ERR_LOCK_BUSY;
+		break;
+	case SS_NOT_SUPPORTED:
+		retcode = ERR_LOCK_NOT_SUPPORTED;
+		break;
+	default:
+		retcode = ERR_INVALID_REQUEST;
+	}
+
+out_unlock:
+	mutex_unlock(&resource->adm_mutex);
+out:
+	drbd_adm_finish(&adm_ctx, info, retcode);
+	return 0;
+}
+
+static int drbd_adm_force_unlock(struct sk_buff *skb, struct genl_info *info)
+{
+	struct drbd_config_context adm_ctx;
+	struct drbd_resource *resource;
+	enum drbd_state_rv rv;
+
+	rv = drbd_adm_prepare(&adm_ctx, skb, info, DRBD_ADM_NEED_RESOURCE);
+	if (!adm_ctx.reply_skb)
+		return rv;
+
+	resource = adm_ctx.resource;
+
+	drbd_warn(resource,
+		"FORCE-UNLOCK requested by operator: clearing local admin_lock "
+		"(held=%d holder=%d gen=%u seq=%llu) without consensus\n",
+		resource->admin_lock.held,
+		resource->admin_lock.holder_node_id,
+		resource->admin_lock.generation_tid,
+		(unsigned long long)resource->admin_lock.seq);
+
+	/* Local-only release without taking adm_mutex. The whole point of
+	 * force-unlock is the operator escape hatch when adm_mutex is
+	 * wedged by a stuck operation; taking adm_mutex here would defeat
+	 * that. state_rwlock orders the write against any concurrent
+	 * reader of admin_lock. */
+	write_lock_irq(&resource->state_rwlock);
+	resource->admin_lock.held = false;
+	resource->admin_lock.holder_node_id = -1;
+	resource->admin_lock.generation_tid = 0;
+	resource->admin_lock.seq++;
+	write_unlock_irq(&resource->state_rwlock);
+
+	/* Push the new view to every connected peer that supports
+	 * DRBD_FF_ADMIN_LOCK. Peers that are currently disconnected will
+	 * adopt the unlocked view via the regular state-handshake exchange
+	 * on (re)connect (drbd_send_admin_lock_state in conn_connect2). */
+	drbd_admin_lock_broadcast_state(resource);
+
+	drbd_adm_finish(&adm_ctx, info, NO_ERROR);
+	return 0;
+}
+
 static bool io_drained(struct drbd_device *device)
 {
 	struct drbd_peer_device *peer_device;
@@ -7111,6 +7444,15 @@ static void resource_to_info(struct resource_info *info,
 	info->res_susp_fen = is_suspended_fen(resource, NOW);
 	info->res_susp_quorum = resource->susp_quorum[NOW];
 	info->res_fail_io = resource->fail_io[NOW];
+	/* admin_lock observability. Read without locking (consistent with
+	 * the rest of resource_to_info which is best-effort snapshot for
+	 * dumps); a torn read here is harmless because the only consumer
+	 * is drbdsetup status / events2. */
+	info->res_admin_lock_held = READ_ONCE(resource->admin_lock.held);
+	info->res_admin_lock_holder_node_id =
+		READ_ONCE(resource->admin_lock.holder_node_id);
+	info->res_admin_lock_generation =
+		READ_ONCE(resource->admin_lock.generation_tid);
 }
 
 static int drbd_adm_new_resource(struct sk_buff *skb, struct genl_info *info)
