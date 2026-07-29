@@ -1,6 +1,6 @@
 Name: drbd-kernel
 Summary: Kernel driver for DRBD
-Version: 9.2.19~flant.14
+Version: 9.2.19~flant.15
 Release: 1
 
 # always require a suitable userland
@@ -232,6 +232,8 @@ dkms remove -m $DKMS_NAME -v $DKMS_VERSION -q --all --rpm_safe_upgrade || :
 %endif
 
 %changelog
+* Wed Jul 29 2026 Flant <vasily.oleynikov@flant.com> - 9.2.19~flant.15
+-  Add the cluster-wide administrative lock (DRBD_ADM_LOCK / UNLOCK / FORCE_UNLOCK, propagated via a new TWOPC_ADMIN_LOCK transaction) and bitmap tracking (DRBD_ADM_TRACK_BITMAP / FLUSH_BITMAP), negotiated through DRBD_FF_ADMIN_LOCK on bit 10. Used by sds-replicated-volume to freeze a volume consistently while snapshotting every replica; the lock lifecycle is owned by userspace and has no kernel-side timeout. Ported from the 9.2.16-flant line.
 * Wed Jul 15 2026 Flant <aleksandr.stefurishin@flant.com> - 9.2.19~flant.14
 -  Fix permanent quorum loss after a Primary-node reboot (all replicas end Outdated/Inconsistent, no UpToDate copy, resource stuck forever). During post-reboot multi-source recovery a peer-state update can ask a node already in L_SYNC_TARGET to re-enter L_WF_BITMAP_T; end_state_change() returns SS_RESYNC_RUNNING and receive_state() treated it as fatal (goto fail -> connection disconnect), which tears down the last good replica relationships and collapses every copy to Outdated so quorum-minimum-redundancy can never be met (~1% of a rebooted Primary's resources; stress/results/run-14). receive_state() now postpones the WF_BITMAP_S/T re-entry (resync_again++) and keeps the connection, mirroring the existing receive_bitmap SS_RESYNC_RUNNING handler. Stock LINBIT path (not flant-introduced); companion to flant.12/flant.13.
 * Thu Jul 23 2026 Flant <aleksandr.stefurishin@flant.com> - 9.2.19~flant.13

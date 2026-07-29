@@ -1,3 +1,9 @@
+drbd (9.2.19~flant.15-1) unstable; urgency=medium
+
+  * Add the cluster-wide administrative lock (DRBD_ADM_LOCK / UNLOCK / FORCE_UNLOCK, propagated via a new TWOPC_ADMIN_LOCK transaction) and bitmap tracking (DRBD_ADM_TRACK_BITMAP / FLUSH_BITMAP), negotiated through DRBD_FF_ADMIN_LOCK on bit 10. Used by sds-replicated-volume to freeze a volume consistently while snapshotting every replica; the lock lifecycle is owned by userspace and has no kernel-side timeout. Ported from the 9.2.16-flant line.
+
+ -- Flant <vasily.oleynikov@flant.com>  Wed, 29 Jul 2026 12:00:00 +0300
+
 drbd (9.2.19~flant.14-1) unstable; urgency=medium
 
   * Fix permanent quorum loss after a Primary-node reboot. During post-reboot multi-source recovery a peer-state update can ask a node already in L_SYNC_TARGET to re-enter L_WF_BITMAP_T; end_state_change() returns SS_RESYNC_RUNNING and receive_state() treated it as fatal (goto fail -> disconnect), collapsing every replica to Outdated with no UpToDate copy so quorum-minimum-redundancy can never be met (resource stuck forever). receive_state() now postpones the WF_BITMAP re-entry (resync_again++) and keeps the connection, mirroring the receive_bitmap handler. Stock LINBIT path. Companion to flant.12/flant.13. See stress/results/run-14.
