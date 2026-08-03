@@ -131,13 +131,18 @@ static int param_set_usermode_helper(const char *val, const struct kernel_param 
 	return param_set_copystring(buf, kp);
 }
 
+static const struct kernel_param_ops param_ops_usermode_helper = {
+	.set = param_set_usermode_helper,
+	.get = param_get_string,
+};
+
 static const struct kparam_string __param_string_usermode_helper = {
 	.maxlen = sizeof(drbd_usermode_helper),
 	.string = drbd_usermode_helper,
 };
 
-module_param_call(usermode_helper, param_set_usermode_helper, param_get_string,
-		  .str = &__param_string_usermode_helper, 0644);
+module_param_cb(usermode_helper, &param_ops_usermode_helper,
+		.str = &__param_string_usermode_helper, 0644);
 __MODULE_PARM_TYPE(usermode_helper, "string");
 
 static int param_set_drbd_protocol_version(const char *s, const struct kernel_param *kp)
