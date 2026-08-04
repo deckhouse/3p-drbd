@@ -1,3 +1,14 @@
+drbd (9.2.19~flant.11-1) unstable; urgency=medium
+
+  * Do not log SS_ALREADY_STANDALONE as an error in ___end_state_change.
+    Idempotent disconnect of an already StandAlone peer returned -9 and, with
+    CS_VERBOSE, printed "State change failed: Can not disconnect a StandAlone
+    device (-9)" via drbd_err, spamming kern.log / breaking e2e. Netlink and
+    teardown already treat this code as success; suppress only the verbose
+    error log while still aborting the no-op state change.
+
+ -- Flant <dmitry.lotakov@flant.com>  Wed, 05 Aug 2026 01:37:00 +0300
+
 drbd (9.2.19~flant.10-1) unstable; urgency=medium
 
   * Fix bitmap leak in drbd_adm_attach() on early attach failure: free device->bitmap on the attach error paths so a replica does not get permanently stuck Diskless with "already has a bitmap, this should not happen" (backport of the fix shape from upstream 9.3.3 commit 8c279459a)
