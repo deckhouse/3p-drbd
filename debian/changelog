@@ -1,3 +1,9 @@
+drbd (9.2.19~flant.12-1) unstable; urgency=medium
+
+  * Strip trailing newline when storing module parameter usermode_helper via sysfs so "disabled" matches and helper WARN spam is avoided (packaged as 9.2.19-flant.12)
+
+ -- Flant <dmitry.lotakov@flant.com>  Wed, 12 Aug 2026 01:30:00 +0300
+
 drbd (9.2.19~flant.11-1) unstable; urgency=medium
 
   * Do not log SS_ALREADY_STANDALONE as an error in ___end_state_change.
