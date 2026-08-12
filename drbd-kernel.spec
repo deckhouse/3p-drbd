@@ -1,6 +1,6 @@
 Name: drbd-kernel
 Summary: Kernel driver for DRBD
-Version: 9.2.19~flant.11
+Version: 9.2.19~flant.12
 Release: 1
 
 # always require a suitable userland
@@ -232,6 +232,9 @@ dkms remove -m $DKMS_NAME -v $DKMS_VERSION -q --all --rpm_safe_upgrade || :
 %endif
 
 %changelog
+* Wed Aug 12 2026 Flant <dmitry.lotakov@flant.com> - 9.2.19~flant.12
+-  Strip trailing newline when storing module parameter usermode_helper via sysfs. Writing with `echo disabled > .../usermode_helper` left "disabled\n" in drbd_usermode_helper, so strcmp(..., "disabled") failed and call_usermodehelper() logged WARN (helper command exit code 255). Packaged as 9.2.19-flant.12.
+
 * Wed Aug 05 2026 Flant <dmitry.lotakov@flant.com> - 9.2.19~flant.11
 -  Do not log SS_ALREADY_STANDALONE as an error in ___end_state_change. Idempotent disconnect of an already StandAlone peer returned -9 and, with CS_VERBOSE, printed "State change failed: Can not disconnect a StandAlone device (-9)" via drbd_err, spamming kern.log / breaking e2e. Netlink and teardown already treat this code as success; suppress only the verbose error log while still aborting the no-op state change.
 
