@@ -6185,11 +6185,37 @@ static int put_resource_in_arg0(struct netlink_callback *cb, int holder_nr)
 	if (cb->args[0]) {
 		struct drbd_resource *resource =
 			(struct drbd_resource *)cb->args[0];
+		cb->args[0] = 0;
 		kref_debug_put(&resource->kref_debug, holder_nr); /* , 6); , 7); */
 		kref_put(&resource->kref, drbd_destroy_resource);
 	}
 
 	return 0;
+}
+
+/* Dump cursor in cb->args[2]: keep a kref so the connection cannot be freed
+ * between dump iterations (and so address reuse cannot confuse the resume). */
+static void put_connection_in_arg2(struct netlink_callback *cb, int holder_nr)
+{
+	if (cb->args[2]) {
+		struct drbd_connection *connection =
+			(struct drbd_connection *)cb->args[2];
+		cb->args[2] = 0;
+		kref_debug_put(&connection->kref_debug, holder_nr);
+		kref_put(&connection->kref, drbd_destroy_connection);
+	}
+}
+
+static void get_connection_in_arg2(struct netlink_callback *cb,
+				   struct drbd_connection *connection,
+				   int holder_nr)
+{
+	if ((struct drbd_connection *)cb->args[2] == connection)
+		return;
+	put_connection_in_arg2(cb, holder_nr);
+	kref_get(&connection->kref);
+	kref_debug_get(&connection->kref_debug, holder_nr);
+	cb->args[2] = (long)connection;
 }
 
 static int drbd_adm_dump_devices_done(struct netlink_callback *cb)
@@ -6286,6 +6312,7 @@ out:
 
 static int drbd_adm_dump_connections_done(struct netlink_callback *cb)
 {
+	put_connection_in_arg2(cb, 20);
 	return put_resource_in_arg0(cb, 6);
 }
 
@@ -6364,16 +6391,23 @@ static int drbd_adm_dump_connections(struct sk_buff *skb, struct netlink_callbac
 		kref_debug_put(&resource->kref_debug, 6);
 		kref_put(&resource->kref, drbd_destroy_resource);
 		resource = NULL;
+		/* Must clear: done() would otherwise double-put via
+		 * put_resource_in_arg0 (SIGTERM during dump → UAF hang). */
+		cb->args[0] = 0;
 		retcode = ERR_INTR;
 		rcu_read_lock();
 		goto put_result;
 	}
 	rcu_read_lock();
 	if (cb->args[2]) {
+		struct drbd_connection *prev =
+			(struct drbd_connection *)cb->args[2];
+
 		for_each_connection_rcu(connection, resource)
-			if (connection == (struct drbd_connection *)cb->args[2])
+			if (connection == prev)
 				goto found_connection;
-		/* connection was probably deleted */
+		/* Removed from list; drop dump cursor ref. */
+		put_connection_in_arg2(cb, 20);
 		goto no_more_connections;
 	}
 	connection = list_entry(&resource->connections, struct drbd_connection, connections);
@@ -6403,7 +6437,7 @@ found_resource:
 		kref_get(&resource->kref);
 		kref_debug_get(&resource->kref_debug, 6);
 		cb->args[0] = (long)resource;
-		cb->args[2] = 0;
+		put_connection_in_arg2(cb, 20);
 		goto next_resource;
 	}
 	goto out;  /* no more resources */
@@ -6438,7 +6472,7 @@ put_result:
 		err = connection_statistics_to_skb(skb, &connection_statistics, !capable(CAP_SYS_ADMIN));
 		if (err)
 			goto out;
-		cb->args[2] = (long)connection;
+		get_connection_in_arg2(cb, connection, 20);
 	}
 	genlmsg_end(skb, dh);
 	err = 0;
