@@ -2,6 +2,14 @@ Latest:
 ------
  For even more detail, use "git log" or visit https://github.com/LINBIT/drbd/commits/master.
 
+9.2.19-flant.13 (api:genl2/proto:86-101,118-124/transport:21)
+--------
+ * Fix double kref_put in drbd_adm_dump_connections when mutex_lock_interruptible
+   is interrupted (e.g. SIGTERM during netlink dump). Clear cb->args[0] on the
+   error path and keep a kref on the connection dump cursor in cb->args[2] to
+   avoid refcount underflow / use-after-free that could hard-hang the node.
+
+
 9.2.19-flant.12 (api:genl2/proto:86-101,118-124/transport:21)
 --------
  * Strip trailing newline when storing module parameter usermode_helper via sysfs.

@@ -1,3 +1,9 @@
+drbd (9.2.19~flant.13-1) unstable; urgency=medium
+
+  * Fix double kref_put in drbd_adm_dump_connections when mutex wait is interrupted by SIGTERM (clear cb->args[0]; kref on connection dump cursor). Packaged as 9.2.19-flant.13
+
+ -- Flant <dmitry.lotakov@flant.com>  Mon, 17 Aug 2026 03:22:00 +0300
+
 drbd (9.2.19~flant.12-1) unstable; urgency=medium
 
   * Strip trailing newline when storing module parameter usermode_helper via sysfs so "disabled" matches and helper WARN spam is avoided (packaged as 9.2.19-flant.12)
