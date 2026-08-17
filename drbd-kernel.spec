@@ -1,6 +1,6 @@
 Name: drbd-kernel
 Summary: Kernel driver for DRBD
-Version: 9.2.19~flant.12
+Version: 9.2.19~flant.14
 Release: 1
 
 # always require a suitable userland
@@ -232,6 +232,9 @@ dkms remove -m $DKMS_NAME -v $DKMS_VERSION -q --all --rpm_safe_upgrade || :
 %endif
 
 %changelog
+* Mon Aug 17 2026 Flant <dmitry.lotakov@flant.com> - 9.2.19~flant.14
+-  Keep diskless Primary on current data generation UUID: adopt relayed P_UUIDS bumps as Primary and refuse applying a received new current UUID already in local history (avoids history-both split-brain). Packaged as 9.2.19-flant.14.
+
 * Wed Aug 12 2026 Flant <dmitry.lotakov@flant.com> - 9.2.19~flant.12
 -  Strip trailing newline when storing module parameter usermode_helper via sysfs. Writing with `echo disabled > .../usermode_helper` left "disabled\n" in drbd_usermode_helper, so strcmp(..., "disabled") failed and call_usermodehelper() logged WARN (helper command exit code 255). Packaged as 9.2.19-flant.12.
 
