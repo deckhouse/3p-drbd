@@ -2,6 +2,15 @@ Latest:
 ------
  For even more detail, use "git log" or visit https://github.com/LINBIT/drbd/commits/master.
 
+9.2.19-flant.14 (api:genl2/proto:86-101,118-124/transport:21)
+--------
+ * Keep diskless Primary on the current data generation UUID: adopt relayed
+   P_UUIDS bumps regardless of role (align with P_CURRENT_UUID), and refuse
+   applying a received new current UUID that is already in local history so a
+   stale Primary cannot roll UpToDate diskful peers into history-both
+   split-brain.
+
+
 9.2.19-flant.12 (api:genl2/proto:86-101,118-124/transport:21)
 --------
  * Strip trailing newline when storing module parameter usermode_helper via sysfs.

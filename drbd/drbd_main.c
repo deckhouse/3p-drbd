@@ -5561,7 +5561,28 @@ void drbd_uuid_received_new_current(struct drbd_peer_device *from_pd, u64 val, u
 
 	if (set_current) {
 		u64 old_current = device->ldev->md.current_uuid;
+		u64 val_base = val & ~UUID_PRIMARY;
 		u64 upd;
+		int i;
+
+		/* A Primary whose exposed_data_uuid lagged can re-advertise an
+		 * older generation. Applying it would rotate our current into
+		 * history and later yield history-both split-brain against peers
+		 * that kept the newer UUID — even when data bits are identical.
+		 * Refuse if the offered UUID is already in our history.
+		 */
+		for (i = 0; i < ARRAY_SIZE(device->ldev->md.history_uuids); i++) {
+			if ((device->ldev->md.history_uuids[i] & ~UUID_PRIMARY) == val_base) {
+				spin_unlock_irq(&device->ldev->md.uuid_lock);
+				up_write(&device->uuid_sem);
+				drbd_err(from_pd,
+					 "ignoring received new current UUID: %016llX "
+					 "(already in local history; current %016llX)\n",
+					 (unsigned long long)val,
+					 (unsigned long long)old_current);
+				return;
+			}
+		}
 
 		if (device->disk_state[NOW] == D_UP_TO_DATE)
 			recipients |= rotate_current_into_bitmap(device, weak_nodes, dagtag);
