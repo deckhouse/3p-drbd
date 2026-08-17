@@ -1,6 +1,6 @@
 Name: drbd-kernel
 Summary: Kernel driver for DRBD
-Version: 9.2.19~flant.12
+Version: 9.2.19~flant.13
 Release: 1
 
 # always require a suitable userland
@@ -232,6 +232,9 @@ dkms remove -m $DKMS_NAME -v $DKMS_VERSION -q --all --rpm_safe_upgrade || :
 %endif
 
 %changelog
+* Mon Aug 17 2026 Flant <dmitry.lotakov@flant.com> - 9.2.19~flant.13
+-  Fix double kref_put in drbd_adm_dump_connections when mutex_lock_interruptible is interrupted (e.g. SIGTERM during netlink dump): clear cb->args[0] on the error path and keep a kref on the connection dump cursor in cb->args[2]. Avoids refcount underflow / use-after-free. Packaged as 9.2.19-flant.13.
+
 * Wed Aug 12 2026 Flant <dmitry.lotakov@flant.com> - 9.2.19~flant.12
 -  Strip trailing newline when storing module parameter usermode_helper via sysfs. Writing with `echo disabled > .../usermode_helper` left "disabled\n" in drbd_usermode_helper, so strcmp(..., "disabled") failed and call_usermodehelper() logged WARN (helper command exit code 255). Packaged as 9.2.19-flant.12.
 
