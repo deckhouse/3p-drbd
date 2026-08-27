@@ -1,4 +1,10 @@
 Latest:
+
+9.2.19-flant.snapshots (api:genl2/proto:86-101,118-124/transport:21)
+ * Add bitmap tracking (track-bitmap/flush-bitmap) and cluster-wide admin lock (lock/unlock/force-unlock) for snapshot orchestration
+ * Add admin_lock_hold_timeout watchdog (auto-release after holder death), suspend_io_timeout (auto-resume of user-suspended IO) and a quorum gate on lock acquisition
+ * Test build: the version carries a name instead of a number on purpose
+
 ------
  For even more detail, use "git log" or visit https://github.com/LINBIT/drbd/commits/master.
 

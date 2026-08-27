@@ -1,3 +1,11 @@
+drbd (9.2.19~flant.snapshots-1) unstable; urgency=medium
+
+  * Add bitmap tracking (track-bitmap/flush-bitmap) and cluster-wide admin lock for snapshot orchestration
+  * Add admin_lock_hold_timeout watchdog, suspend_io_timeout auto-resume and a quorum gate on lock acquisition
+  * Test build: the version carries a name instead of a number on purpose
+
+ -- Flant <alexandr.zimin@flant.com>  Wed, 27 Aug 2026 12:00:00 +0300
+
 drbd (9.2.19~flant.12-1) unstable; urgency=medium
 
   * Strip trailing newline when storing module parameter usermode_helper via sysfs so "disabled" matches and helper WARN spam is avoided (packaged as 9.2.19-flant.12)

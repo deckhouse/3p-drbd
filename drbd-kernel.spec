@@ -1,6 +1,6 @@
 Name: drbd-kernel
 Summary: Kernel driver for DRBD
-Version: 9.2.19~flant.12
+Version: 9.2.19~flant.snapshots
 Release: 1
 
 # always require a suitable userland
@@ -232,6 +232,9 @@ dkms remove -m $DKMS_NAME -v $DKMS_VERSION -q --all --rpm_safe_upgrade || :
 %endif
 
 %changelog
+* Wed Aug 27 2026 Flant <alexandr.zimin@flant.com> - 9.2.19~flant.snapshots
+- Snapshot orchestration test build: bitmap tracking, cluster-wide admin lock
+
 * Wed Aug 12 2026 Flant <dmitry.lotakov@flant.com> - 9.2.19~flant.12
 -  Strip trailing newline when storing module parameter usermode_helper via sysfs. Writing with `echo disabled > .../usermode_helper` left "disabled\n" in drbd_usermode_helper, so strcmp(..., "disabled") failed and call_usermodehelper() logged WARN (helper command exit code 255). Packaged as 9.2.19-flant.12.
 
