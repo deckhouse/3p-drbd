@@ -1,8 +1,9 @@
 Latest:
 
-9.2.19-flant.snapshots (api:genl2/proto:86-101,118-124/transport:21)
+9.2.19-flant.snapshots2 (api:genl2/proto:86-101,118-124/transport:21)
  * Add bitmap tracking (track-bitmap/flush-bitmap) and cluster-wide admin lock (lock/unlock/force-unlock) for snapshot orchestration
  * Add admin_lock_hold_timeout watchdog (auto-release after holder death), suspend_io_timeout (auto-resume of user-suspended IO) and a quorum gate on lock acquisition
+ * Build the kernel module on kernels older than v6.16 (run coccinelle over drbd_admin_lock.c)
  * Test build: the version carries a name instead of a number on purpose
 
 ------

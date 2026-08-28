@@ -11,7 +11,7 @@
 
 const char *drbd_buildtag(void);
 
-#define REL_VERSION "9.2.19-flant.snapshots"
+#define REL_VERSION "9.2.19-flant.snapshots2"
 #define PRO_VERSION_MIN 118 /* 9.0.26 */
 #define PRO_VERSION_MAX 124
 
