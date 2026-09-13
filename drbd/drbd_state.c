@@ -1331,6 +1331,7 @@ static void print_state_change(struct drbd_resource *resource, const char *prefi
 static bool local_disk_may_be_outdated(struct drbd_device *device)
 {
 	struct drbd_peer_device *peer_device;
+	bool have_diskful_primary = false;
 
 	if (device->resource->role[NEW] == R_PRIMARY) {
 		for_each_peer_device(peer_device, device) {
@@ -1342,17 +1343,17 @@ static bool local_disk_may_be_outdated(struct drbd_device *device)
 	}
 
 	for_each_peer_device(peer_device, device) {
-		if (peer_device->connection->peer_role[NEW] == R_PRIMARY &&
-		    peer_device->repl_state[NEW] > L_OFF)
-			goto have_primary_neighbor;
+		if (peer_device->connection->peer_role[NEW] != R_PRIMARY ||
+		    peer_device->repl_state[NEW] <= L_OFF)
+			continue;
+		if (peer_device->disk_state[NEW] != D_DISKLESS)
+			have_diskful_primary = true;
 	}
 
-	return true;	/* No neighbor primary, I might be outdated*/
-
-have_primary_neighbor:
-	/* Allow self outdating while connecting to a diskless primary. */
-	if (peer_device->disk_state[NEW] == D_DISKLESS &&
-	    peer_device->repl_state[OLD] == L_OFF && peer_device->repl_state[NEW] == L_ESTABLISHED)
+	/* No diskful Primary neighbor: allow outdate (no primary at all,
+	 * connect-to-diskless-primary, or after losing a diskful Primary
+	 * while a Diskless Primary remains Connected). */
+	if (!have_diskful_primary)
 		return true;
 
 	for_each_peer_device(peer_device, device) {
