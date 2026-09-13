@@ -1,6 +1,6 @@
 Name: drbd-kernel
 Summary: Kernel driver for DRBD
-Version: 9.2.19~flant.15
+Version: 9.2.19~flant.16
 Release: 1
 
 # always require a suitable userland
@@ -232,6 +232,9 @@ dkms remove -m $DKMS_NAME -v $DKMS_VERSION -q --all --rpm_safe_upgrade || :
 %endif
 
 %changelog
+* Mon Sep 14 2026 Flant <dmitry.lotakov@flant.com> - 9.2.19~flant.16
+-  Allow Secondary outdate while Connected only to Diskless Primary neighbors (avoid SS_CONNECTED_OUTDATES FATAL 2PC / UUID fork).
+
 * Mon Aug 31 2026 Flant <dmitry.lotakov@flant.com> - 9.2.19~flant.15
 -  Keep drbdsetup status/show responsive when down holds conf_update by using trylock in dump paths and skipping busy resources.
 -  Split drbd_adm_down unregister flow into short conf_update prepare and finish outside conf_update, so del_gendisk does not hold conf_update.

@@ -2,6 +2,13 @@ Latest:
 ------
  For even more detail, use "git log" or visit https://github.com/LINBIT/drbd/commits/master.
 
+9.2.19-flant.16 (api:genl2/proto:86-101,118-124/transport:21)
+--------
+ * Allow a Secondary to become Outdated while still Connected to a
+   Diskless Primary after losing a diskful Primary. Avoids
+   SS_CONNECTED_OUTDATES (-6) FATAL 2PC commit failures and UUID forks.
+
+
 9.2.19-flant.15 (api:genl2/proto:86-101,118-124/transport:21)
 --------
  * Do not block dump_connections/dump_paths on resource->conf_update:
