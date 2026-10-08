@@ -1,6 +1,6 @@
 Name: drbd-kernel
 Summary: Kernel driver for DRBD
-Version: 9.2.19~flant.19
+Version: 9.2.19~flant.20
 Release: 1
 
 # always require a suitable userland
@@ -232,6 +232,9 @@ dkms remove -m $DKMS_NAME -v $DKMS_VERSION -q --all --rpm_safe_upgrade || :
 %endif
 
 %changelog
+* Fri Oct 09 2026 Flant <dmitry.lotakov@flant.com> - 9.2.19~flant.20
+-  Do not outdate a quorum holder when an isolated diskful Primary returns through a diskless peer (far_away_change / weak_nodes).
+
 * Wed Oct 07 2026 Flant <dmitry.lotakov@flant.com> - 9.2.19~flant.19
 -  Do not abort resync from an UpToDate SyncSource that landed in weak_nodes (Diskless Primary reconnect mid-resync).
 
