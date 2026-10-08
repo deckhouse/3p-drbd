@@ -5391,7 +5391,8 @@ change_cluster_wide_state(bool (*change)(struct change_context *, enum change_ph
 			if ((context->mask.role == role_MASK && context->val.role == R_PRIMARY) ||
 			    (context->mask.role != role_MASK && resource->role[NOW] == R_PRIMARY)) {
 				reply->primary_nodes |= NODE_MASK(resource->res_opts.node_id);
-				if (drbd_res_data_accessible(resource))
+				if (drbd_res_data_accessible(resource) &&
+				    resource->cached_all_devices_have_quorum)
 					reply->weak_nodes |= ~directly_reachable;
 			}
 
@@ -5990,7 +5991,8 @@ static bool do_twopc_after_lost_peer(struct change_context *context, enum change
 		NODE_MASK(resource->res_opts.node_id);
 	bool pri_incapable = reply->primary_nodes && !reply->weak_nodes; /* TWOPC_PRI_INCAPABLE */
 
-	if (phase == PH_COMMIT && (reply->primary_nodes & ~directly_reachable && !pri_incapable)) {
+	if (phase == PH_COMMIT && (reply->primary_nodes & ~directly_reachable && !pri_incapable) &&
+	    !resource->cached_all_devices_have_quorum) {
 		__outdate_myself(resource);
 	} else {
 		struct drbd_device *device;
@@ -6228,7 +6230,8 @@ static bool do_change_cstate(struct change_context *context, enum change_phase p
 		u64 directly_reachable = directly_connected_nodes(resource, NEW) |
 			NODE_MASK(resource->res_opts.node_id);
 
-		if (reply->primary_nodes & ~directly_reachable)
+		if (reply->primary_nodes & ~directly_reachable &&
+		    !resource->cached_all_devices_have_quorum)
 			__outdate_myself(resource);
 	}
 
