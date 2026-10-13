@@ -1,3 +1,10 @@
+drbd (9.2.19~flant.21-1) unstable; urgency=medium
+
+  * Do not drop a 2D+TB survivor from UpToDate to Consistent after an
+    ungraceful diskful Primary death while the tiebreaker still holds.
+
+ -- Flant <dmitry.lotakov@flant.com>  Tue, 13 Oct 2026 09:30:00 +0300
+
 drbd (9.2.19~flant.20-1) unstable; urgency=medium
 
   * Do not outdate a quorum holder when an isolated diskful Primary
