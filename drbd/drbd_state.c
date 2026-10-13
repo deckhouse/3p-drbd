@@ -2104,6 +2104,32 @@ static void drbd_select_sync_target(struct drbd_device *device)
 	}
 }
 
+static bool still_tiebreaker_majority(struct drbd_device *device)
+{
+	struct drbd_peer_device *peer_device;
+	u64 self;
+
+	if (!test_bit(TIEBREAKER_QUORUM, &device->flags))
+		return false;
+
+	self = drbd_current_uuid(device) & ~UUID_PRIMARY;
+	for_each_peer_device_rcu(peer_device, device) {
+		u64 peer;
+
+		if (peer_device->repl_state[NEW] == L_OFF)
+			continue;
+		if (peer_device->disk_state[NEW] != D_DISKLESS)
+			continue;
+		if (want_bitmap(peer_device))
+			continue;
+		peer = peer_device->current_uuid & ~UUID_PRIMARY;
+		if (peer && self && peer != self)
+			return false;
+	}
+
+	return true;
+}
+
 static void sanitize_state(struct drbd_resource *resource)
 {
 	enum drbd_role *role = resource->role;
@@ -2487,7 +2513,8 @@ static void sanitize_state(struct drbd_resource *resource)
 			disk_state[NEW] = /* ldev_safe: disk_state */ disk_state_from_md(device);
 
 		if (maybe_crashed_primary && !connected_primaries &&
-		    disk_state[NEW] == D_UP_TO_DATE && role[NOW] == R_SECONDARY)
+		    disk_state[NEW] == D_UP_TO_DATE && role[NOW] == R_SECONDARY &&
+		    !still_tiebreaker_majority(device))
 			disk_state[NEW] = D_CONSISTENT;
 	}
 	rcu_read_unlock();
