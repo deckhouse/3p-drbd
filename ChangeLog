@@ -2,6 +2,13 @@ Latest:
 ------
  For even more detail, use "git log" or visit https://github.com/LINBIT/drbd/commits/master.
 
+9.2.19-flant.21 (api:genl2/proto:86-101,118-124/transport:21)
+--------
+ * Do not drop a 2D+TB survivor from UpToDate to Consistent after an
+   ungraceful diskful Primary death while the tiebreaker still holds
+   (same-generation diskless witness).
+
+
 9.2.19-flant.20 (api:genl2/proto:86-101,118-124/transport:21)
 --------
  * Do not outdate a quorum holder when an isolated diskful Primary
