@@ -7203,7 +7203,8 @@ retry:
 		u64 directly_reachable = directly_connected_nodes(resource, NEW) |
 			NODE_MASK(resource->res_opts.node_id);
 
-		if (reply->primary_nodes & ~directly_reachable)
+		if (reply->primary_nodes & ~directly_reachable &&
+		    !resource->cached_all_devices_have_quorum)
 			__outdate_myself(resource);
 	}
 
@@ -7479,7 +7480,8 @@ far_away_change(struct drbd_connection *connection,
 	}
 
 	if (state_change->primary_nodes & ~directly_reachable &&
-	    !(request->flags & TWOPC_PRI_INCAPABLE))
+	    !(request->flags & TWOPC_PRI_INCAPABLE) &&
+	    !resource->cached_all_devices_have_quorum)
 		__outdate_myself(resource);
 
 	idr_for_each_entry(&resource->devices, device, iterate_vnr) {
@@ -8069,7 +8071,8 @@ retry:
 		if (resource->role[NOW] == R_PRIMARY) {
 			reply->primary_nodes |= NODE_MASK(resource->res_opts.node_id);
 
-			if (drbd_res_data_accessible(resource))
+			if (drbd_res_data_accessible(resource) &&
+			    resource->cached_all_devices_have_quorum)
 				reply->weak_nodes = ~reply->reachable_nodes;
 		}
 	}

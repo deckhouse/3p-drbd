@@ -1,3 +1,10 @@
+drbd (9.2.19~flant.20-1) unstable; urgency=medium
+
+  * Do not outdate a quorum holder when an isolated diskful Primary
+    returns through a diskless peer (far_away_change / weak_nodes).
+
+ -- Flant <dmitry.lotakov@flant.com>  Fri, 09 Oct 2026 02:30:00 +0300
+
 drbd (9.2.19~flant.19-1) unstable; urgency=medium
 
   * Do not abort resync from an UpToDate source that landed in

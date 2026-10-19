@@ -2,6 +2,12 @@ Latest:
 ------
  For even more detail, use "git log" or visit https://github.com/LINBIT/drbd/commits/master.
 
+9.2.19-flant.20 (api:genl2/proto:86-101,118-124/transport:21)
+--------
+ * Do not outdate a quorum holder when an isolated diskful Primary
+   returns through a diskless peer (far_away_change / weak_nodes).
+
+
 9.2.19-flant.19 (api:genl2/proto:86-101,118-124/transport:21)
 --------
  * Do not abort a diskful resync just because the SyncSource is in
