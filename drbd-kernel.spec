@@ -1,6 +1,6 @@
 Name: drbd-kernel
 Summary: Kernel driver for DRBD
-Version: 9.2.19~flant.20
+Version: 9.2.19~flant.21
 Release: 1
 
 # always require a suitable userland
@@ -232,6 +232,9 @@ dkms remove -m $DKMS_NAME -v $DKMS_VERSION -q --all --rpm_safe_upgrade || :
 %endif
 
 %changelog
+* Tue Oct 13 2026 Flant <dmitry.lotakov@flant.com> - 9.2.19~flant.21
+-  Do not drop a 2D+TB survivor from UpToDate to Consistent after an ungraceful diskful Primary death while the tiebreaker still holds.
+
 * Fri Oct 09 2026 Flant <dmitry.lotakov@flant.com> - 9.2.19~flant.20
 -  Do not outdate a quorum holder when an isolated diskful Primary returns through a diskless peer (far_away_change / weak_nodes).
 
