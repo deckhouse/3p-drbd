@@ -1,3 +1,10 @@
+drbd (9.2.19~flant.19-1) unstable; urgency=medium
+
+  * Do not abort resync from an UpToDate source that landed in
+    weak_nodes (Diskless Primary reconnect mid-resync).
+
+ -- Flant <dmitry.lotakov@flant.com>  Wed, 07 Oct 2026 01:00:00 +0300
+
 drbd (9.2.19~flant.18-1) unstable; urgency=medium
 
   * Hold kref on dump_resources cursor; skip dying snapshot objects;

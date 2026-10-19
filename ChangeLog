@@ -2,6 +2,13 @@ Latest:
 ------
  For even more detail, use "git log" or visit https://github.com/LINBIT/drbd/commits/master.
 
+9.2.19-flant.19 (api:genl2/proto:86-101,118-124/transport:21)
+--------
+ * Do not abort a diskful resync just because the SyncSource is in
+   weak_nodes: skip abort while that peer is still D_UP_TO_DATE
+   (Diskless Primary reconnect mid-resync).
+
+
 9.2.19-flant.18 (api:genl2/proto:86-101,118-124/transport:21)
 --------
  * Hold a kref on the GET_RESOURCES netlink dump cursor and add .done,

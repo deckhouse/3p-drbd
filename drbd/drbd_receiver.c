@@ -6955,7 +6955,8 @@ static void check_resync_source(struct drbd_device *device, u64 weak_nodes)
 	for_each_peer_device_rcu(peer_device, device) {
 		enum drbd_repl_state repl_state = peer_device->repl_state[NOW];
 		if ((repl_state == L_SYNC_TARGET || repl_state == L_PAUSED_SYNC_T) &&
-		    NODE_MASK(peer_device->node_id) & weak_nodes) {
+		    (NODE_MASK(peer_device->node_id) & weak_nodes) &&
+		    peer_device->disk_state[NOW] < D_UP_TO_DATE) {
 			rcu_read_unlock();
 			goto abort;
 		}
