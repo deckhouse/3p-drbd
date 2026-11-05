@@ -1,6 +1,6 @@
 Name: drbd-kernel
 Summary: Kernel driver for DRBD
-Version: 9.2.19~flant.21
+Version: 9.2.19~flant.22
 Release: 1
 
 # always require a suitable userland
@@ -232,6 +232,9 @@ dkms remove -m $DKMS_NAME -v $DKMS_VERSION -q --all --rpm_safe_upgrade || :
 %endif
 
 %changelog
+* Thu Nov 05 2026 Flant <dmitry.lotakov@flant.com> - 9.2.19~flant.22
+-  Rename the bitmap node_id_to_mask helper so the module compiles (clash with the one-argument inline from flant.18).
+
 * Tue Oct 13 2026 Flant <dmitry.lotakov@flant.com> - 9.2.19~flant.21
 -  Do not drop a 2D+TB survivor from UpToDate to Consistent after an ungraceful diskful Primary death while the tiebreaker still holds.
 

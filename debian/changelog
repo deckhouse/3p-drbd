@@ -1,3 +1,10 @@
+drbd (9.2.19~flant.22-1) unstable; urgency=medium
+
+  * Rename the bitmap node_id_to_mask helper so the module compiles
+    (clash with the one-argument inline from flant.18).
+
+ -- Flant <dmitry.lotakov@flant.com>  Thu, 05 Nov 2026 13:14:00 +0300
+
 drbd (9.2.19~flant.21-1) unstable; urgency=medium
 
   * Do not drop a 2D+TB survivor from UpToDate to Consistent after an
