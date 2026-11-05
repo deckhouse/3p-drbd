@@ -2,6 +2,12 @@ Latest:
 ------
  For even more detail, use "git log" or visit https://github.com/LINBIT/drbd/commits/master.
 
+9.2.19-flant.22 (api:genl2/proto:86-101,118-124/transport:21)
+--------
+ * Rename the bitmap node_id_to_mask helper so it does not clash with
+   the one-argument inline from flant.18 (module would not compile).
+
+
 9.2.19-flant.21 (api:genl2/proto:86-101,118-124/transport:21)
 --------
  * Do not drop a 2D+TB survivor from UpToDate to Consistent after an
